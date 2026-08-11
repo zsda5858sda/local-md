@@ -1,0 +1,11 @@
+node_modules/
+.pnpm-store/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.idea/
+.vscode/
+*.log
+.DS_Store
+.snapshots/
+tests/Local-first_Markdown編輯器_系統設計規劃書_v1.3.md

@@ -1,0 +1,34 @@
+{
+  "settings": {
+    "autoSaveDebounceMs": 1500,
+    "autoSaveEnabled": true,
+    "exportMode": "strict",
+    "lineBreakMode": "soft",
+    "openFolderFileFormatPolicy": "preserve",
+    "softBreakSerialization": "space"
+  },
+  "ui": {
+    "expandedFolders": [],
+    "lastOpenedFile": "frontmatter-toml.md",
+    "openTabs": [
+      "frontmatterr.md",
+      "frontmatter-toml.md",
+      "code-block.md"
+    ],
+    "propertiesWidth": 288,
+    "sidebarWidth": 224,
+    "tabAssignments": {
+      "code-block.md": "group-1786413139210-1",
+      "frontmatter-toml.md": "group-1786413139210-1"
+    },
+    "tabGroups": [
+      {
+        "collapsed": false,
+        "id": "group-1786413139210-1",
+        "name": "群組 1"
+      }
+    ]
+  },
+  "version": 1,
+  "workspaceName": "fixtures"
+}
