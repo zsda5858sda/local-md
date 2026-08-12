@@ -24,6 +24,8 @@ use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 const SETTINGS_VERSION: u64 = 1;
 const SNAPSHOT_RETENTION: usize = 5;
 const SNAPSHOT_MIN_INTERVAL: Duration = Duration::from_secs(60);
+const MAX_MARKDOWN_BYTES: u64 = 20 * 1024 * 1024;
+const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
 
 struct WatchState(Mutex<Option<RecommendedWatcher>>);
 
@@ -77,6 +79,43 @@ struct SaveRequest {
 struct SaveResult {
     hash: String,
     save_generation: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind")]
+enum SaveError {
+    Conflict {
+        expected: Option<String>,
+        actual: Option<String>,
+    },
+    Io {
+        message: String,
+    },
+    Encoding {
+        message: String,
+    },
+}
+
+impl SaveError {
+    fn io(message: impl Into<String>) -> Self {
+        Self::Io { message: message.into() }
+    }
+
+    fn encoding(message: impl Into<String>) -> Self {
+        Self::Encoding { message: message.into() }
+    }
+}
+
+impl From<String> for SaveError {
+    fn from(message: String) -> Self {
+        Self::io(message)
+    }
+}
+
+impl From<&str> for SaveError {
+    fn from(message: &str) -> Self {
+        Self::io(message)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -158,6 +197,17 @@ fn is_markdown(path: &Path) -> bool {
         .and_then(|value| value.to_str())
         .map(|value| value.eq_ignore_ascii_case("md") || value.eq_ignore_ascii_case("markdown"))
         .unwrap_or(false)
+}
+
+fn sniff_image_mime(bytes: &[u8]) -> Option<&'static str> {
+    match bytes {
+        [0x89, 0x50, 0x4E, 0x47, ..] => Some("image/png"),
+        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
+        [0x47, 0x49, 0x46, 0x38, ..] => Some("image/gif"),
+        bytes if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") => Some("image/webp"),
+        [0x42, 0x4D, ..] => Some("image/bmp"),
+        _ => None,
+    }
 }
 
 fn scan_directory(root: &Path, directory: &Path) -> Result<Vec<WorkspaceEntry>, String> {
@@ -264,11 +314,11 @@ fn current_hash(path: &Path) -> Result<Option<String>, String> {
     Ok(Some(hash_bytes(&bytes)))
 }
 
-fn verify_expected(path: &Path, expected: &Option<String>, force: bool) -> Result<(), String> {
+fn verify_expected(path: &Path, expected: &Option<String>, force: bool) -> Result<(), SaveError> {
     if force { return Ok(()); }
     let actual = current_hash(path)?;
     if expected.as_ref() != actual.as_ref() {
-        return Err(format!("CONFLICT: 磁碟版本已變更（expected {:?}, actual {:?}）", expected, actual));
+        return Err(SaveError::Conflict { expected: expected.clone(), actual });
     }
     Ok(())
 }
@@ -318,17 +368,21 @@ fn atomic_replace(source: &Path, destination: &Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn scan_workspace(root: String) -> Result<Vec<WorkspaceEntry>, String> {
+fn scan_workspace(root: String) -> Result<Vec<WorkspaceEntry>, SaveError> {
     let root = canonical_root(&root)?;
-    scan_directory(&root, &root)
+    Ok(scan_directory(&root, &root)?)
 }
 
 #[tauri::command]
-fn read_markdown(root: String, relative_path: String) -> Result<DiskDocument, String> {
+fn read_markdown(root: String, relative_path: String) -> Result<DiskDocument, SaveError> {
     let (_, path) = scoped_path(&root, &relative_path, true)?;
     if !is_markdown(&path) { return Err("只允許讀取 .md / .markdown 文件".into()); }
+    let metadata = fs::metadata(&path).map_err(|error| format!("讀取檔案資訊失敗：{error}"))?;
+    if metadata.len() > MAX_MARKDOWN_BYTES {
+        return Err(format!("檔案超過 {}MB 限制，請使用其他工具開啟", MAX_MARKDOWN_BYTES / 1024 / 1024).into());
+    }
     let bytes = fs::read(&path).map_err(|error| format!("讀取失敗：{error}"))?;
-    let (content, profile) = detect_and_decode(&bytes)?;
+    let (content, profile) = detect_and_decode(&bytes).map_err(SaveError::encoding)?;
     Ok(DiskDocument {
         path: path.to_string_lossy().to_string(),
         relative_path,
@@ -340,12 +394,12 @@ fn read_markdown(root: String, relative_path: String) -> Result<DiskDocument, St
 }
 
 #[tauri::command]
-fn write_markdown(request: SaveRequest) -> Result<SaveResult, String> {
+fn write_markdown(request: SaveRequest) -> Result<SaveResult, SaveError> {
     let exists = Path::new(&request.root).join(&request.relative_path).exists();
     let (root, path) = scoped_path(&request.root, &request.relative_path, exists)?;
     if !is_markdown(&path) { return Err("只允許寫入 .md / .markdown 文件".into()); }
     verify_expected(&path, &request.expected_hash, request.force)?;
-    let bytes = encode_content(&request.content, &request.profile)?;
+    let bytes = encode_content(&request.content, &request.profile).map_err(SaveError::encoding)?;
     let parent = path.parent().ok_or("無法判定父資料夾")?;
     let mut temporary = TempBuilder::new().prefix(".local-md-").suffix(".tmp").tempfile_in(parent).map_err(|error| format!("建立暫存檔失敗：{error}"))?;
     temporary.write_all(&bytes).map_err(|error| format!("寫入暫存檔失敗：{error}"))?;
@@ -359,32 +413,32 @@ fn write_markdown(request: SaveRequest) -> Result<SaveResult, String> {
 }
 
 #[tauri::command]
-fn create_entry(root: String, relative_path: String, kind: String) -> Result<(), String> {
+fn create_entry(root: String, relative_path: String, kind: String) -> Result<(), SaveError> {
     let (_, path) = scoped_path(&root, &relative_path, false)?;
     if path.exists() { return Err("同名檔案或資料夾已存在".into()); }
     match kind.as_str() {
-        "directory" => fs::create_dir(&path).map_err(|error| error.to_string()),
+        "directory" => fs::create_dir(&path).map_err(|error| SaveError::io(error.to_string())),
         "file" => {
             if !is_markdown(&path) { return Err("新文件副檔名必須為 .md 或 .markdown".into()); }
-            fs::write(&path, b"# Untitled\n").map_err(|error| error.to_string())
+            fs::write(&path, b"# Untitled\n").map_err(|error| SaveError::io(error.to_string()))
         }
         _ => Err("未知的項目類型".into()),
     }
 }
 
 #[tauri::command]
-fn rename_entry(root: String, from: String, to: String) -> Result<(), String> {
+fn rename_entry(root: String, from: String, to: String) -> Result<(), SaveError> {
     let (canonical, source) = scoped_path(&root, &from, true)?;
     let (_, destination) = scoped_path(&root, &to, false)?;
     if destination.exists() { return Err("目的路徑已存在".into()); }
     if !source.starts_with(&canonical) || !destination.starts_with(&canonical) { return Err("路徑超出 Workspace".into()); }
-    fs::rename(source, destination).map_err(|error| format!("重新命名失敗：{error}"))
+    fs::rename(source, destination).map_err(|error| SaveError::io(format!("重新命名失敗：{error}")))
 }
 
 #[tauri::command]
-fn delete_entry(root: String, relative_path: String) -> Result<(), String> {
+fn delete_entry(root: String, relative_path: String) -> Result<(), SaveError> {
     let (_, path) = scoped_path(&root, &relative_path, true)?;
-    trash::delete(path).map_err(|error| format!("移至資源回收桶失敗：{error}"))
+    trash::delete(path).map_err(|error| SaveError::io(format!("移至資源回收桶失敗：{error}")))
 }
 
 fn default_settings(root: &Path) -> serde_json::Value {
@@ -461,7 +515,7 @@ fn normalize_settings(root: &Path, value: &serde_json::Value) -> (serde_json::Va
 }
 
 #[tauri::command]
-fn read_workspace_settings(root: String) -> Result<SettingsResult, String> {
+fn read_workspace_settings(root: String) -> Result<SettingsResult, SaveError> {
     let root = canonical_root(&root)?;
     let path = root.join(".editor-config.json");
     if !path.exists() { return Ok(SettingsResult { settings: default_settings(&root), read_only: false, warning: None }); }
@@ -497,7 +551,7 @@ fn read_workspace_settings(root: String) -> Result<SettingsResult, String> {
 }
 
 #[tauri::command]
-fn write_workspace_settings(root: String, settings: serde_json::Value) -> Result<(), String> {
+fn write_workspace_settings(root: String, settings: serde_json::Value) -> Result<(), SaveError> {
     let root = canonical_root(&root)?;
     let version = settings.get("version").and_then(|item| item.as_u64()).unwrap_or(0);
     if version > SETTINGS_VERSION { return Err("設定檔版本較新，拒絕覆寫".into()); }
@@ -508,11 +562,11 @@ fn write_workspace_settings(root: String, settings: serde_json::Value) -> Result
     temporary.write_all(b"\n").map_err(|error| error.to_string())?;
     temporary.as_file().sync_all().map_err(|error| error.to_string())?;
     let (_file, temporary_path) = temporary.keep().map_err(|error| error.to_string())?;
-    atomic_replace(&temporary_path, &root.join(".editor-config.json"))
+    Ok(atomic_replace(&temporary_path, &root.join(".editor-config.json"))?)
 }
 
 #[tauri::command]
-fn watch_workspace(app: AppHandle, state: State<'_, WatchState>, root: String) -> Result<(), String> {
+fn watch_workspace(app: AppHandle, state: State<'_, WatchState>, root: String) -> Result<(), SaveError> {
     let root = canonical_root(&root)?;
     let watched_root = root.clone();
     let mut watcher = notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
@@ -528,7 +582,7 @@ fn watch_workspace(app: AppHandle, state: State<'_, WatchState>, root: String) -
         }
     }).map_err(|error| error.to_string())?;
     watcher.watch(&root, RecursiveMode::Recursive).map_err(|error| error.to_string())?;
-    *state.0.lock().map_err(|_| "watcher lock poisoned")? = Some(watcher);
+    *state.0.lock().map_err(|_| SaveError::io("watcher lock poisoned"))? = Some(watcher);
     Ok(())
 }
 
@@ -549,7 +603,7 @@ fn normalized_asset_path(document_relative_path: &str, asset_reference: &str) ->
 }
 
 #[tauri::command]
-fn read_workspace_asset(root: String, document_relative_path: String, asset_reference: String) -> Result<Option<String>, String> {
+fn read_workspace_asset(root: String, document_relative_path: String, asset_reference: String) -> Result<Option<String>, SaveError> {
     if asset_reference.starts_with('#') || asset_reference.starts_with('/') || Regex::new(r"(?i)^[a-z][a-z\d+.-]*:").map_err(|error| error.to_string())?.is_match(&asset_reference) {
         return Ok(None);
     }
@@ -564,8 +618,14 @@ fn read_workspace_asset(root: String, document_relative_path: String, asset_refe
         "bmp" => "image/bmp",
         _ => return Err("只允許載入 PNG、JPEG、GIF、WebP 或 BMP 圖片".into()),
     };
-    let bytes = fs::read(path).map_err(|error| format!("讀取圖片失敗：{error}"))?;
-    if bytes.len() > 20 * 1024 * 1024 { return Err("圖片超過 20 MB 限制".into()); }
+    let metadata = fs::metadata(&path).map_err(|error| format!("讀取圖片資訊失敗：{error}"))?;
+    if metadata.len() > MAX_IMAGE_BYTES { return Err("圖片超過 20 MB 限制".into()); }
+    let bytes = fs::read(&path).map_err(|error| format!("讀取圖片失敗：{error}"))?;
+    let detected_mime = sniff_image_mime(&bytes);
+    if detected_mime != Some(mime) {
+        eprintln!("警告：拒絕副檔名與內容不符的 Workspace 圖片：{}", path.display());
+        return Err("圖片副檔名與檔案內容不符".into());
+    }
     Ok(Some(format!("data:{mime};base64,{}", BASE64.encode(bytes))))
 }
 
@@ -592,7 +652,7 @@ fn secure_import_destination(root: &Path, relative: &Path) -> Result<PathBuf, St
 }
 
 #[tauri::command]
-fn import_workspace(source: String, target: String) -> Result<ImportReport, String> {
+fn import_workspace(source: String, target: String) -> Result<ImportReport, SaveError> {
     let source = canonical_root(&source)?;
     let target = canonical_root(&target)?;
     if source == target || source.starts_with(&target) || target.starts_with(&source) { return Err("來源與目標 Workspace 不得相同或互相包含".into()); }
@@ -626,7 +686,7 @@ fn import_workspace(source: String, target: String) -> Result<ImportReport, Stri
 }
 
 #[tauri::command]
-fn export_workspace(root: String, destination: String) -> Result<(), String> {
+fn export_workspace(root: String, destination: String) -> Result<(), SaveError> {
     let root = canonical_root(&root)?;
     let destination_path = PathBuf::from(destination);
     let parent = destination_path.parent().ok_or("無法判定匯出資料夾")?;
@@ -651,11 +711,11 @@ fn export_workspace(root: String, destination: String) -> Result<(), String> {
     zip.finish().map_err(|error| error.to_string())?;
     temporary.as_file().sync_all().map_err(|error| error.to_string())?;
     let (_file, temporary_path) = temporary.keep().map_err(|error| error.to_string())?;
-    atomic_replace(&temporary_path, &checked_destination)
+    Ok(atomic_replace(&temporary_path, &checked_destination)?)
 }
 
 #[tauri::command]
-fn scan_orphan_assets(root: String) -> Result<Vec<String>, String> {
+fn scan_orphan_assets(root: String) -> Result<Vec<String>, SaveError> {
     let root = canonical_root(&root)?;
     let assets = root.join("_assets");
     if !assets.exists() { return Ok(Vec::new()); }
@@ -752,6 +812,18 @@ mod tests {
     }
 
     #[test]
+    fn serializes_save_conflicts_with_a_stable_kind() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("note.md");
+        fs::write(&path, b"disk content\n").unwrap();
+        let error = verify_expected(&path, &Some("stale-hash".into()), false).unwrap_err();
+        let value = serde_json::to_value(error).unwrap();
+        assert_eq!(value["kind"], "Conflict");
+        assert_eq!(value["expected"], "stale-hash");
+        assert_eq!(value["actual"], hash_bytes(b"disk content\n"));
+    }
+
+    #[test]
     fn normalizes_incomplete_settings() {
         let directory = tempfile::tempdir().unwrap();
         let (settings, changed) = normalize_settings(directory.path(), &serde_json::json!({}));
@@ -769,6 +841,45 @@ mod tests {
     fn rejects_asset_parent_escape() {
         assert!(normalized_asset_path("note.md", "../secret.png").is_err());
         assert_eq!(normalized_asset_path("notes/note.md", "../images/a.png").unwrap(), PathBuf::from("images/a.png"));
+    }
+
+    #[test]
+    fn sniffs_supported_image_magic_bytes() {
+        assert_eq!(sniff_image_mime(&[0x89, 0x50, 0x4e, 0x47]), Some("image/png"));
+        assert_eq!(sniff_image_mime(&[0xff, 0xd8, 0xff]), Some("image/jpeg"));
+        assert_eq!(sniff_image_mime(b"GIF89a"), Some("image/gif"));
+        assert_eq!(sniff_image_mime(b"RIFF\x01\x00\x00\x00WEBP"), Some("image/webp"));
+        assert_eq!(sniff_image_mime(b"BM"), Some("image/bmp"));
+        assert_eq!(sniff_image_mime(b"RIFF"), None);
+    }
+
+    #[test]
+    fn rejects_image_when_extension_and_magic_bytes_disagree() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("fake.png"), [0xff, 0xd8, 0xff, 0x00]).unwrap();
+        assert!(read_workspace_asset(
+            root.path().to_string_lossy().into(),
+            "note.md".into(),
+            "fake.png".into(),
+        ).is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_markdown_before_reading_content() {
+        let root = tempfile::tempdir().unwrap();
+        File::create(root.path().join("large.md")).unwrap().set_len(MAX_MARKDOWN_BYTES + 1).unwrap();
+        assert!(read_markdown(root.path().to_string_lossy().into(), "large.md".into()).is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_image_before_reading_content() {
+        let root = tempfile::tempdir().unwrap();
+        File::create(root.path().join("large.png")).unwrap().set_len(MAX_IMAGE_BYTES + 1).unwrap();
+        assert!(read_workspace_asset(
+            root.path().to_string_lossy().into(),
+            "note.md".into(),
+            "large.png".into(),
+        ).is_err());
     }
 
     #[test]

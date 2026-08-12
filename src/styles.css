@@ -247,7 +247,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .toast, .error-toast { position: fixed; z-index: 60; display: flex; align-items: center; gap: 8px; box-shadow: 0 8px 30px rgba(44,41,35,.2); border-radius: 7px; font-size: 12px; }
 .toast { bottom: 18px; left: 50%; padding: 9px 14px; transform: translateX(-50%); background: #283c33; color: white; }
 .toast svg { width: 14px; }
-.error-toast { right: 18px; bottom: 18px; max-width: 480px; padding: 11px 12px; background: #5c312d; color: white; }
+.error-toast { z-index: 90; right: 18px; bottom: 18px; max-width: 480px; padding: 11px 12px; background: #5c312d; color: white; }
 .error-toast > svg { width: 17px; }
 .error-toast button { margin-left: auto; border: 0; background: transparent; color: white; cursor: pointer; }
 .error-toast button svg { width: 14px; }

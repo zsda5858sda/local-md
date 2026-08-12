@@ -6,6 +6,8 @@ import { applySaveSuccess, classifySaveConflict } from "../src/services/saveStat
 import { reorderById } from "../src/services/tabOrder";
 import { replaceMatches, searchPattern } from "../src/services/searchReplace";
 import { shortcutAction } from "../src/services/keyboardShortcuts";
+import { errorMessage, isSaveError } from "../src/services/desktop";
+import { validateEntryName } from "../src/services/entryName";
 import type { OpenDocument } from "../src/domain/types";
 
 describe("FileFormatProfile", () => {
@@ -141,5 +143,30 @@ describe("autosave revisions", () => {
 
   it("reports a conflict only for a real content change", () => {
     expect(classifySaveConflict("old\n", "mine\n", "theirs\n")).toBe("external-change");
+  });
+});
+
+describe("structured save errors", () => {
+  it("recognizes conflict errors without inspecting localized messages", () => {
+    const error = { kind: "Conflict", expected: "old-hash", actual: "new-hash" };
+    expect(isSaveError(error)).toBe(true);
+    expect(errorMessage(error)).toBe("磁碟版本已變更");
+  });
+
+  it("preserves general structured error messages", () => {
+    const error = { kind: "Encoding", message: "Big5 無法表示此字元" };
+    expect(isSaveError(error)).toBe(true);
+    expect(errorMessage(error)).toBe(error.message);
+  });
+});
+
+describe("entry name validation", () => {
+  it.each(["a/b", "a\\b", "a:b", "a*b", "a?b", 'a"b', "a<b", "a>b", "a|b"])(
+    "rejects reserved path characters in %s",
+    (name) => expect(validateEntryName(name)).toMatch(/名稱不能包含/),
+  );
+
+  it("accepts a plain entry name", () => {
+    expect(validateEntryName("會議記錄.md")).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import type { Root } from "mdast";
 import type { MarkdownIssue, SourcePosition } from "../domain/types";
+import { containsUnsafeHtml } from "../services/htmlSanitizer";
 
 type MdNode = {
   type: string;
@@ -92,7 +93,7 @@ export function validateAndPreserve(root: Root, source: string): ValidationResul
     if (child.type === "html" && !SAFE_INLINE_HTML.test(String(child.value ?? "").trim())) {
       const raw = sourceSlice(child, source);
       if (raw !== null) {
-        const dangerous = /<\s*(script|iframe)\b|\bon\w+\s*=|javascript:/i.test(raw);
+        const dangerous = containsUnsafeHtml(raw);
         nextChildren.push({
           type: "rawMarkdown",
           value: raw,

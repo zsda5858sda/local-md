@@ -8,10 +8,11 @@ import type { FrontMatterState, OpenDocument, SearchHit, TiptapNode, WorkspaceEn
 import { DEFAULT_WORKSPACE_SETTINGS } from "./domain/types";
 import { parseMarkdown, serializeMarkdown } from "./markdown/pipeline";
 import {
-  chooseWorkspace, createEntry, deleteEntry, exportWorkspace, importFolder, isTauri,
+  chooseWorkspace, createEntry, deleteEntry, errorMessage, exportWorkspace, importFolder, isSaveError, isTauri,
   readDocument, readWorkspaceSettings, renameEntry, saveDocument, scanOrphanAssets,
   scanWorkspace, watchWorkspace, writeWorkspaceSettings,
 } from "./services/desktop";
+import { validateEntryName } from "./services/entryName";
 import { rewriteIncomingLinks, rewriteOutgoingLinks } from "./services/linkRewrite";
 import { WorkspaceSearchIndex } from "./services/searchIndex";
 import { applySaveSuccess, classifySaveConflict } from "./services/saveState";
@@ -171,7 +172,7 @@ export default function App() {
       setTree(entries);
       return entries;
     } catch (error) {
-      setFatalError(error instanceof Error ? error.message : String(error));
+      setFatalError(errorMessage(error));
       return [];
     }
   }, [workspaceRoot]);
@@ -188,7 +189,7 @@ export default function App() {
       setSearchError(undefined);
       setSearchHits(searchIndex.current.search(query, 50, regex, scope === "document" ? active?.relativePath : undefined));
     } catch (error) {
-      setSearchError(error instanceof Error ? error.message : String(error));
+      setSearchError(errorMessage(error));
       setSearchHits([]);
     }
   }, []);
@@ -250,7 +251,7 @@ export default function App() {
       setSessionReady(true);
       void indexWorkspace(root, entries);
     } catch (error) {
-      setFatalError(error instanceof Error ? error.message : String(error));
+      setFatalError(errorMessage(error));
     } finally { setLoading(false); }
   }, [indexWorkspace, selectDocument, updateDocuments]);
 
@@ -267,7 +268,7 @@ export default function App() {
           lastOpenedFile: active?.relativePath ?? null,
         },
       };
-      void writeWorkspaceSettings(workspaceRoot, next).catch((error) => setSettingsWarning(error instanceof Error ? error.message : String(error)));
+      void writeWorkspaceSettings(workspaceRoot, next).catch((error) => setSettingsWarning(errorMessage(error)));
     }, 400);
     return () => window.clearTimeout(settingsTimer.current);
   }, [activeId, documents, sessionReady, settings, settingsReadOnly, workspaceRoot]);
@@ -334,7 +335,7 @@ export default function App() {
         updateDocuments((current) => [...current, next]);
         selectDocument(next.id);
         searchIndex.current.update(disk.path, disk.relativePath, disk.content);
-      } catch (error) { setFatalError(error instanceof Error ? error.message : String(error)); }
+      } catch (error) { setFatalError(errorMessage(error)); }
       finally { setLoading(false); }
     }
     const assignedGroup = settings.ui.tabAssignments[entry.relativePath];
@@ -367,8 +368,7 @@ export default function App() {
       if (searchQueryRef.current) refreshSearchResults();
       setToast("已安全儲存");
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("CONFLICT")) {
+      if (isSaveError(error) && error.kind === "Conflict") {
         try {
           const disk = await readDocument(root, doc.relativePath);
           const classification = classifySaveConflict(doc.content, content, disk.content);
@@ -400,7 +400,7 @@ export default function App() {
         setFatalError(null);
       } else {
         updateDocuments((current) => current.map((item) => item.id === id ? { ...item, saving: false } : item));
-        setFatalError(message);
+        setFatalError(errorMessage(error));
       }
     } finally {
       savingIds.current.delete(id);
@@ -461,13 +461,13 @@ export default function App() {
     if (activeIdRef.current === id) selectDocument(remaining[index]?.id ?? remaining[index - 1]?.id ?? null);
   }, [selectDocument, updateDocuments]);
 
-  const closeTabs = useCallback((ids: string[]) => {
+  const closeTabs = useCallback((ids: string[]): boolean => {
     const targets = new Set(ids);
-    if (!targets.size) return;
+    if (!targets.size) return true;
     const current = documentsRef.current;
     const affected = current.filter((doc) => targets.has(doc.id));
     const unsavedCount = affected.filter((doc) => doc.dirty || doc.saving).length;
-    if (unsavedCount > 0 && !window.confirm(`有 ${unsavedCount} 個檔案尚未完成儲存，仍要關閉嗎？`)) return;
+    if (unsavedCount > 0 && !window.confirm(`有 ${unsavedCount} 個檔案尚未完成儲存，仍要關閉嗎？`)) return false;
     affected.forEach((doc) => {
       const timer = saveTimers.current.get(doc.id);
       if (timer) window.clearTimeout(timer);
@@ -476,6 +476,7 @@ export default function App() {
     const remaining = current.filter((doc) => !targets.has(doc.id));
     updateDocuments(remaining);
     if (activeIdRef.current && targets.has(activeIdRef.current)) selectDocument(remaining.at(-1)?.id ?? null);
+    return true;
   }, [selectDocument, updateDocuments]);
 
   const reloadFromDisk = async (id: string) => {
@@ -487,13 +488,18 @@ export default function App() {
       updateDocuments((current) => current.map((item) => item.id === id ? { ...item, ...disk, parsed: parseMarkdown(disk.content), dirty: false, saving: false, conflict: undefined, revision: item.revision + 1, editorVersion: item.editorVersion + 1 } : item));
       searchIndex.current.update(disk.path, disk.relativePath, disk.content);
       setToast("已重新載入磁碟版本");
-    } catch (error) { setFatalError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { setFatalError(errorMessage(error)); }
   };
 
   const submitEntryDialog = async () => {
     if (!workspaceRoot || !entryDialog) return;
     const raw = entryDialog.value.trim();
     if (!raw) return;
+    const validationError = validateEntryName(raw);
+    if (validationError) {
+      setFatalError(validationError);
+      return;
+    }
     setEntryDialog(null);
     if (entryDialog.mode !== "rename") {
       const kind = entryDialog.mode === "create-file" ? "file" : "directory";
@@ -510,7 +516,7 @@ export default function App() {
           setSettings((current) => ({ ...current, ui: { ...current.ui, expandedFolders: [...new Set([...current.ui.expandedFolders, relativePath])] } }));
         }
         setToast("已建立");
-      } catch (error) { setFatalError(error instanceof Error ? error.message : String(error)); }
+      } catch (error) { setFatalError(errorMessage(error)); }
       return;
     }
 
@@ -560,7 +566,7 @@ export default function App() {
       }));
       void indexWorkspace(workspaceRoot, entries);
       setToast("已重新命名並更新相對連結");
-    } catch (error) { setFatalError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { setFatalError(errorMessage(error)); }
   };
 
   const handleDelete = async (entry: WorkspaceEntry) => {
@@ -585,7 +591,7 @@ export default function App() {
       if (!remaining.some((doc) => doc.id === activeIdRef.current)) selectDocument(remaining.at(-1)?.id ?? null);
       await refreshTree();
       setToast("已移至資源回收桶");
-    } catch (error) { setFatalError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { setFatalError(errorMessage(error)); }
   };
 
   const handleSearch = (query: string) => {
@@ -606,7 +612,7 @@ export default function App() {
   const handleReplaceAll = async () => {
     if (!workspaceRoot || !searchQuery.trim()) return;
     try { searchPattern(searchQuery, searchRegex, true); }
-    catch (error) { setSearchError(error instanceof Error ? error.message : String(error)); return; }
+    catch (error) { setSearchError(errorMessage(error)); return; }
 
     if (searchScope === "document") {
       const doc = documentsRef.current.find((item) => item.id === activeIdRef.current);
@@ -656,7 +662,7 @@ export default function App() {
       }
       refreshSearchResults();
       setToast(`已在 ${changes.length} 個檔案中取代 ${total} 處`);
-    } catch (error) { setFatalError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { setFatalError(errorMessage(error)); }
     finally { setLoading(false); }
   };
 
@@ -676,7 +682,7 @@ export default function App() {
       void indexWorkspace(workspaceRoot, entries);
       setToast(`匯入完成：${report.succeeded} 成功、${report.failed} 失敗`);
       if (report.failed > 0) setFatalError(report.files.filter((file) => file.status === "failed").slice(0, 8).map((file) => `${file.relativePath}: ${file.error}`).join("\n"));
-    } catch (error) { setFatalError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { setFatalError(errorMessage(error)); }
     finally { setLoading(false); }
   };
 
@@ -687,7 +693,7 @@ export default function App() {
     try {
       const completed = await exportWorkspace(workspaceRoot, settings.workspaceName);
       if (completed) setToast("Workspace ZIP 已匯出");
-    } catch (error) { setFatalError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { setFatalError(errorMessage(error)); }
     finally { setLoading(false); }
   };
 
@@ -698,7 +704,7 @@ export default function App() {
       const orphaned = await scanOrphanAssets(workspaceRoot);
       setToast(orphaned.length ? `找到 ${orphaned.length} 個孤兒資源；未刪除任何檔案` : "沒有孤兒資源");
       if (orphaned.length) setFatalError(`孤兒資源（僅列出，未刪除）：\n${orphaned.slice(0, 20).join("\n")}`);
-    } catch (error) { setFatalError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { setFatalError(errorMessage(error)); }
   };
 
   useEffect(() => {
@@ -782,23 +788,17 @@ export default function App() {
 
   const closeTabGroup = (groupId: string) => {
     const ids = documentsRef.current.filter((doc) => settings.ui.tabAssignments[doc.relativePath] === groupId).map((doc) => doc.id);
-    closeTabs(ids);
+    const closed = closeTabs(ids);
+    if (!closed) return;
     setGroupMenu(null);
   };
 
   const deleteTabGroup = (groupId: string) => {
-    const targets = new Set(documentsRef.current.filter((doc) => settings.ui.tabAssignments[doc.relativePath] === groupId).map((doc) => doc.id));
-    const affected = documentsRef.current.filter((doc) => targets.has(doc.id));
-    const unsavedCount = affected.filter((doc) => doc.dirty || doc.saving).length;
-    if (unsavedCount > 0 && !window.confirm(`群組內有 ${unsavedCount} 個分頁尚未儲存，仍要刪除群組嗎？`)) return;
-    affected.forEach((doc) => {
-      const timer = saveTimers.current.get(doc.id);
-      if (timer) window.clearTimeout(timer);
-      saveTimers.current.delete(doc.id);
-    });
-    const remaining = documentsRef.current.filter((doc) => !targets.has(doc.id));
-    updateDocuments(remaining);
-    if (activeIdRef.current && targets.has(activeIdRef.current)) selectDocument(remaining.at(-1)?.id ?? null);
+    const ids = documentsRef.current
+      .filter((doc) => settings.ui.tabAssignments[doc.relativePath] === groupId)
+      .map((doc) => doc.id);
+    const closed = closeTabs(ids);
+    if (!closed) return;
     removeTabGroup(groupId);
     setGroupMenu(null);
   };

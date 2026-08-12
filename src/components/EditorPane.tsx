@@ -11,6 +11,7 @@ import { common, createLowlight } from "lowlight";
 import type { OpenDocument, TiptapNode } from "../domain/types";
 import { MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
 import { loadWorkspaceAsset } from "../services/desktop";
+import { sanitizeHtml } from "../services/htmlSanitizer";
 import { Toolbar } from "./Toolbar";
 
 const lowlight = createLowlight(common);
@@ -63,15 +64,14 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
     content: document.parsed.doc,
     editorProps: {
       attributes: { class: "prose-editor", "aria-label": `編輯 ${document.title}`, spellcheck: "true" },
-      handlePaste: (_view, event) => {
+      handlePaste: (view, event) => {
         const html = event.clipboardData?.getData("text/html") ?? "";
-        if (/<(?:script|iframe)\b|\bon\w+\s*=|javascript:/i.test(html)) {
-          event.preventDefault();
-          const plain = event.clipboardData?.getData("text/plain") ?? "";
-          window.document.execCommand?.("insertText", false, plain);
-          return true;
-        }
-        return false;
+        if (!html) return false;
+        event.preventDefault();
+        const sanitized = sanitizeHtml(html);
+        if (sanitized) editor?.commands.insertContent(sanitized);
+        else view.dispatch(view.state.tr.insertText(event.clipboardData?.getData("text/plain") ?? ""));
+        return true;
       },
     },
     onUpdate: ({ editor: current }) => onChange(current.getJSON() as TiptapNode),

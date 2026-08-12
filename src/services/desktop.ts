@@ -69,10 +69,33 @@ export interface SaveRequest {
   saveGeneration: number;
 }
 
+export type SaveError =
+  | { kind: "Conflict"; expected: string | null; actual: string | null }
+  | { kind: "Io"; message: string }
+  | { kind: "Encoding"; message: string };
+
+export function isSaveError(error: unknown): error is SaveError {
+  if (typeof error !== "object" || error === null || !("kind" in error)) return false;
+  const candidate = error as Record<string, unknown>;
+  if (candidate.kind === "Conflict") {
+    return (typeof candidate.expected === "string" || candidate.expected === null)
+      && (typeof candidate.actual === "string" || candidate.actual === null);
+  }
+  return (candidate.kind === "Io" || candidate.kind === "Encoding") && typeof candidate.message === "string";
+}
+
+export function errorMessage(error: unknown): string {
+  if (isSaveError(error)) return error.kind === "Conflict" ? "磁碟版本已變更" : error.message;
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function saveDocument(request: SaveRequest): Promise<{ hash: string; saveGeneration: number }> {
   if (!isTauri()) {
     const current = demoFiles.get(request.relativePath) ?? "";
-    if (!request.force && request.expectedHash && demoHash(current) !== request.expectedHash) throw new Error("CONFLICT: 磁碟版本已變更");
+    const actual = demoHash(current);
+    if (!request.force && request.expectedHash && actual !== request.expectedHash) {
+      throw { kind: "Conflict", expected: request.expectedHash, actual } satisfies SaveError;
+    }
     demoFiles.set(request.relativePath, request.content);
     return { hash: demoHash(request.content), saveGeneration: request.saveGeneration + 1 };
   }

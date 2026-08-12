@@ -1,10 +1,13 @@
+// @vitest-environment jsdom
+
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { parseMarkdown, semanticRoundTrip, serializeMarkdown } from "../src/markdown/pipeline";
+import { containsUnsafeHtml, sanitizeHtml } from "../src/services/htmlSanitizer";
 
-const fixture = (name: string) => readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8");
+const fixture = (name: string) => readFileSync(resolve(process.cwd(), "tests", "fixtures", name), "utf8");
 
 describe("canonical Markdown round-trip", () => {
   for (const name of [
@@ -68,6 +71,17 @@ describe("canonical Markdown round-trip", () => {
     expect(parsed.mode).toBe("visual");
     expect(parsed.doc.content?.[0]?.type).toBe("rawMarkdown");
     expect(parsed.issues[0]?.kind).toBe("unsafe-html");
+  });
+
+  it("detects sanitizer changes instead of relying on an HTML blacklist", () => {
+    expect(containsUnsafeHtml('<svg onload="alert(1)"></svg>')).toBe(true);
+    expect(containsUnsafeHtml('<img src="data:image/svg+xml,<svg onload=alert(1)>">')).toBe(true);
+    expect(containsUnsafeHtml("<strong>safe</strong>")).toBe(false);
+  });
+
+  it("sanitizes the complete pasted HTML against a fixed allowlist", () => {
+    const sanitized = sanitizeHtml('<p class="x"><strong>safe</strong><img src="data:image/svg+xml,evil" onerror="alert(1)"><a href="javascript:alert(1)">link</a></p>');
+    expect(sanitized).toBe("<p><strong>safe</strong><img><a>link</a></p>");
   });
 });
 
