@@ -143,6 +143,26 @@ struct ImportFileResult {
     error: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PanelLimits {
+    sidebar: PanelLimit,
+    properties: PanelLimit,
+    editor_minimum: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PanelLimit {
+    minimum: u64,
+    maximum: u64,
+    default: u64,
+}
+
+fn panel_limits() -> PanelLimits {
+    serde_json::from_str(include_str!("../../shared/panel-limits.json"))
+        .expect("shared/panel-limits.json must be valid")
+}
+
 fn hash_bytes(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
@@ -442,6 +462,8 @@ fn delete_entry(root: String, relative_path: String) -> Result<(), SaveError> {
 }
 
 fn default_settings(root: &Path) -> serde_json::Value {
+    let panel_limits = panel_limits();
+    debug_assert!(panel_limits.editor_minimum > 0);
     serde_json::json!({
         "version": 1,
         "workspaceName": root.file_name().and_then(|value| value.to_str()).unwrap_or("Notes"),
@@ -453,11 +475,12 @@ fn default_settings(root: &Path) -> serde_json::Value {
             "exportMode": "strict",
             "openFolderFileFormatPolicy": "preserve"
         },
-        "ui": { "expandedFolders": [], "lastOpenedFile": null, "openTabs": [], "sidebarWidth": 276, "propertiesWidth": 288, "tabGroups": [], "tabAssignments": {} }
+        "ui": { "expandedFolders": [], "lastOpenedFile": null, "openTabs": [], "sidebarWidth": panel_limits.sidebar.default, "propertiesWidth": panel_limits.properties.default, "tabGroups": [], "tabAssignments": {} }
     })
 }
 
 fn normalize_settings(root: &Path, value: &serde_json::Value) -> (serde_json::Value, bool) {
+    let panel_limits = panel_limits();
     let mut normalized = default_settings(root);
     let Some(input) = value.as_object() else { return (normalized, true); };
     if let Some(name) = input.get("workspaceName").and_then(|item| item.as_str()).filter(|item| !item.trim().is_empty() && item.len() <= 200) {
@@ -484,10 +507,10 @@ fn normalize_settings(root: &Path, value: &serde_json::Value) -> (serde_json::Va
         if let Some(values) = ui.get("openTabs").and_then(|item| item.as_array()) {
             normalized["ui"]["openTabs"] = values.iter().filter_map(|item| item.as_str()).map(|item| item.into()).collect::<Vec<serde_json::Value>>().into();
         }
-        if let Some(value) = ui.get("sidebarWidth").and_then(|item| item.as_u64()).filter(|item| (224..=420).contains(item)) {
+        if let Some(value) = ui.get("sidebarWidth").and_then(|item| item.as_u64()).filter(|item| (panel_limits.sidebar.minimum..=panel_limits.sidebar.maximum).contains(item)) {
             normalized["ui"]["sidebarWidth"] = value.into();
         }
-        if let Some(value) = ui.get("propertiesWidth").and_then(|item| item.as_u64()).filter(|item| (240..=480).contains(item)) {
+        if let Some(value) = ui.get("propertiesWidth").and_then(|item| item.as_u64()).filter(|item| (panel_limits.properties.minimum..=panel_limits.properties.maximum).contains(item)) {
             normalized["ui"]["propertiesWidth"] = value.into();
         }
         if let Some(groups) = ui.get("tabGroups").and_then(|item| item.as_array()) {
@@ -831,10 +854,39 @@ mod tests {
         assert_eq!(settings["settings"]["autoSaveDebounceMs"], 1500);
         assert_eq!(settings["settings"]["autoSaveEnabled"], true);
         assert!(settings["ui"]["openTabs"].is_array());
-        assert_eq!(settings["ui"]["sidebarWidth"], 276);
-        assert_eq!(settings["ui"]["propertiesWidth"], 288);
+        let limits = panel_limits();
+        assert_eq!(settings["ui"]["sidebarWidth"], limits.sidebar.default);
+        assert_eq!(settings["ui"]["propertiesWidth"], limits.properties.default);
         assert!(settings["ui"]["tabGroups"].is_array());
         assert!(settings["ui"]["tabAssignments"].is_object());
+    }
+
+    #[test]
+    fn shared_panel_limits_match_expected_contract() {
+        let limits = panel_limits();
+        assert_eq!((limits.sidebar.minimum, limits.sidebar.maximum, limits.sidebar.default), (224, 420, 276));
+        assert_eq!((limits.properties.minimum, limits.properties.maximum, limits.properties.default), (240, 480, 288));
+        assert_eq!(limits.editor_minimum, 420);
+    }
+
+    #[test]
+    fn matches_shared_encoding_vectors() {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct EncodingVector {
+            bytes_base64: String,
+            content: String,
+            profile: FileFormatProfile,
+        }
+        let vectors: Vec<EncodingVector> = serde_json::from_str(include_str!("../../shared/encoding-vectors.json")).unwrap();
+        for vector in vectors {
+            let bytes = BASE64.decode(vector.bytes_base64).unwrap();
+            let (content, profile) = detect_and_decode(&bytes).unwrap();
+            assert_eq!(content, vector.content);
+            assert_eq!(profile.encoding, vector.profile.encoding);
+            assert_eq!(profile.bom, vector.profile.bom);
+            assert_eq!(profile.eol, vector.profile.eol);
+        }
     }
 
     #[test]

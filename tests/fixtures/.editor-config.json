@@ -13,7 +13,8 @@
     "openTabs": [
       "frontmatterr.md",
       "frontmatter-toml.md",
-      "code-block.md"
+      "code-block.md",
+      "frontmatter.md"
     ],
     "propertiesWidth": 288,
     "sidebarWidth": 224,
@@ -24,6 +25,7 @@
     "tabGroups": [
       {
         "collapsed": false,
+        "color": "#6b7280",
         "id": "group-1786413139210-1",
         "name": "群組 1"
       }

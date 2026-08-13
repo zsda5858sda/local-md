@@ -1,0 +1,5 @@
+{
+  "sidebar": { "minimum": 224, "maximum": 420, "default": 276 },
+  "properties": { "minimum": 240, "maximum": 480, "default": 288 },
+  "editorMinimum": 420
+}

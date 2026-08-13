@@ -5,6 +5,22 @@ import {
 } from "lucide-react";
 import type { SearchHit, WorkspaceEntry } from "../domain/types";
 
+export interface SearchProps {
+  query: string;
+  replacementText: string;
+  scope: "document" | "workspace";
+  regex: boolean;
+  error?: string;
+  hits: SearchHit[];
+  shortcut: { mode: "search" | "replace"; nonce: number } | null;
+  onQueryChange: (query: string) => void;
+  onReplacementChange: (value: string) => void;
+  onScopeChange: (scope: "document" | "workspace") => void;
+  onRegexChange: (enabled: boolean) => void;
+  onReplaceAll: () => void;
+  onOpenHit: (hit: SearchHit) => void;
+}
+
 interface SidebarProps {
   width: number;
   workspaceName: string;
@@ -12,19 +28,7 @@ interface SidebarProps {
   activePath?: string;
   selectedFolder?: string;
   expandedFolders: string[];
-  searchQuery: string;
-  replacementText: string;
-  searchScope: "document" | "workspace";
-  searchRegex: boolean;
-  searchError?: string;
-  searchHits: SearchHit[];
-  searchShortcut: { mode: "search" | "replace"; nonce: number } | null;
-  onSearch: (query: string) => void;
-  onReplacementChange: (value: string) => void;
-  onSearchScopeChange: (scope: "document" | "workspace") => void;
-  onSearchRegexChange: (enabled: boolean) => void;
-  onReplaceAll: () => void;
-  onOpenSearch: (hit: SearchHit) => void;
+  search: SearchProps;
   onOpen: (entry: WorkspaceEntry) => void;
   onSelectFolder: (path: string) => void;
   onToggleFolder: (path: string) => void;
@@ -49,9 +53,13 @@ function TreeItem({ entry, depth, props }: { entry: WorkspaceEntry; depth: numbe
             props.onToggleFolder(entry.relativePath);
           } else props.onOpen(entry);
         }}>
-          {isFolder ? (expanded ? <ChevronDown className="tree-chevron" /> : <ChevronRight className="tree-chevron" />) : <span className="tree-chevron" />}
-          {isFolder ? (expanded ? <FolderOpen /> : <Folder />) : <FileText />}
-          <span>{entry.name}</span>
+          <span className="tree-disclosure" aria-hidden="true">
+            {isFolder ? (expanded ? <ChevronDown /> : <ChevronRight />) : null}
+          </span>
+          <span className="tree-icon" aria-hidden="true">
+            {isFolder ? (expanded ? <FolderOpen /> : <Folder />) : <FileText />}
+          </span>
+          <span className="tree-label">{entry.name}</span>
         </button>
         <button className="tree-more" aria-label={`${entry.name} 選單`} aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}><MoreHorizontal /></button>
         {menuOpen && (
@@ -74,19 +82,19 @@ export function Sidebar(props: SidebarProps) {
   const replacementInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!props.searchShortcut) return;
+    if (!props.search.shortcut) return;
     setSearchOpen(true);
-  }, [props.searchShortcut]);
+  }, [props.search.shortcut]);
 
   useEffect(() => {
-    if (!searchOpen || !props.searchShortcut) return;
+    if (!searchOpen || !props.search.shortcut) return;
     const frame = window.requestAnimationFrame(() => {
-      const input = props.searchShortcut?.mode === "replace" ? replacementInputRef.current : searchInputRef.current;
+      const input = props.search.shortcut?.mode === "replace" ? replacementInputRef.current : searchInputRef.current;
       input?.focus();
       input?.select();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [props.searchShortcut, searchOpen]);
+  }, [props.search.shortcut, searchOpen]);
   return (
     <aside className="sidebar" style={{ flexBasis: `${props.width}px` }}>
       <header className="sidebar-header">
@@ -100,20 +108,20 @@ export function Sidebar(props: SidebarProps) {
       </div>
       {searchOpen && (
         <div className="search-panel">
-          <label className="search-field"><Search /><input ref={searchInputRef} autoFocus value={props.searchQuery} onChange={(event) => props.onSearch(event.target.value)} placeholder="搜尋 Markdown 原文…" /></label>
-          <label className="search-field"><span>取代</span><input ref={replacementInputRef} value={props.replacementText} onChange={(event) => props.onReplacementChange(event.target.value)} placeholder="取代為…" /></label>
+          <label className="search-field"><Search /><input ref={searchInputRef} autoFocus value={props.search.query} onChange={(event) => props.search.onQueryChange(event.target.value)} placeholder="搜尋 Markdown 原文…" /></label>
+          <label className="search-field"><span>取代</span><input ref={replacementInputRef} value={props.search.replacementText} onChange={(event) => props.search.onReplacementChange(event.target.value)} placeholder="取代為…" /></label>
           <div className="search-options">
-            <select aria-label="搜尋範圍" value={props.searchScope} onChange={(event) => props.onSearchScopeChange(event.target.value as "document" | "workspace")}>
+            <select aria-label="搜尋範圍" value={props.search.scope} onChange={(event) => props.search.onScopeChange(event.target.value as "document" | "workspace")}>
               <option value="document">目前文件</option>
               <option value="workspace">整個工作區</option>
             </select>
-            <label><input type="checkbox" checked={props.searchRegex} onChange={(event) => props.onSearchRegexChange(event.target.checked)} />Regex</label>
+            <label><input type="checkbox" checked={props.search.regex} onChange={(event) => props.search.onRegexChange(event.target.checked)} />Regex</label>
           </div>
-          {props.searchError && <div className="search-error" role="alert">{props.searchError}</div>}
-          <div className="search-summary"><span>{props.searchQuery ? `${props.searchHits.length} 筆結果${props.searchHits.length >= 50 ? "（最多顯示 50）" : ""}` : "輸入文字開始搜尋"}</span><button disabled={!props.searchQuery.trim() || Boolean(props.searchError)} onClick={props.onReplaceAll}>全部取代</button></div>
+          {props.search.error && <div className="search-error" role="alert">{props.search.error}</div>}
+          <div className="search-summary"><span>{props.search.query ? `${props.search.hits.length} 筆結果${props.search.hits.length >= 50 ? "（最多顯示 50）" : ""}` : "輸入文字開始搜尋"}</span><button disabled={!props.search.query.trim() || Boolean(props.search.error)} onClick={props.search.onReplaceAll}>全部取代</button></div>
           <ul>
-            {props.searchHits.map((hit) => (
-              <li key={hit.id}><button onClick={() => props.onOpenSearch(hit)}><strong>{hit.relativePath}</strong><span>{hit.lineNumber} · {hit.rawLineText || "空白行"}</span></button></li>
+            {props.search.hits.map((hit) => (
+              <li key={hit.id}><button onClick={() => props.search.onOpenHit(hit)}><strong>{hit.relativePath}</strong><span>{hit.lineNumber} · {hit.rawLineText || "空白行"}</span></button></li>
             ))}
           </ul>
         </div>

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "utf8-bom-crlf",
+    "bytesBase64": "77u/5Lit5paHDQrnrKzkuozooYwNCg==",
+    "content": "中文\n第二行\n",
+    "profile": { "encoding": "utf-8", "bom": "utf8", "eol": "crlf" }
+  },
+  {
+    "name": "big5-crlf",
+    "bytesBase64": "s2+sT6RApffBY8XppKSk5b1zvVi0+rjVpOWl86FBpV2ndLFgqKOkpKTlpnK1/LtQvNDCSbLFuLmhQ6V4xleoz6XOqsylaaVIpb+9VL5cxaqzb6xxpLquZaFDrau9xrT6uNWkuq5lpUi0o7CqsLu0+rfHvVSr16FDs2+sT6RApffBY8XppKSk5b1zvVi0+rjVpOWl86FBpV2ndLFgqKOkpKTlpnK1/LtQvNDCSbLFuLmhQ6V4xleoz6XOqsylaaVIpb+9VL5cxaqzb6xxpLquZaFDrau9xrT6uNWkuq5lpUi0o7CqsLu0+rfHvVSr16FDs2+sT6RApffBY8XppKSk5b1zvVi0+rjVpOWl86FBpV2ndLFgqKOkpKTlpnK1/LtQvNDCSbLFuLmhQ6V4xleoz6XOqsylaaVIpb+9VL5cxaqzb6xxpLquZaFDrau9xrT6uNWkuq5lpUi0o7CqsLu0+rfHvVSr16FDDQo=",
+    "content": "這是一份繁體中文編碼測試文件，包含常見中文字詞與標點符號。台灣使用者可以正確閱讀這段內容。重複測試內容以提高偵測準確度。這是一份繁體中文編碼測試文件，包含常見中文字詞與標點符號。台灣使用者可以正確閱讀這段內容。重複測試內容以提高偵測準確度。這是一份繁體中文編碼測試文件，包含常見中文字詞與標點符號。台灣使用者可以正確閱讀這段內容。重複測試內容以提高偵測準確度。\n",
+    "profile": { "encoding": "big5", "bom": "none", "eol": "crlf" }
+  },
+  {
+    "name": "gbk-lf",
+    "bytesBase64": "1eLKx9K7t9288szl1tDOxLHgwuuy4srUzsS8/qOssPy6rLOjvPvW0M7EtMrT79Prseq147f7usWho9bQufrTw7unv8nS1NX9yLfUxLbB1eK2zsTayN2ho9bYuLSy4srUxNrI3dLUzOG437zssuLXvMi3tsiho9XiysfSu7fdvPLM5dbQzsSx4MLrsuLK1M7EvP6jrLD8uqyzo7z71tDOxLTK0+/T67HqteO3+7rFoaPW0Ln608O7p7/J0tTV/ci31MS2wdXits7E2sjdoaPW2Li0suLK1MTayN3S1MzhuN+87LLi17zIt7bIoaPV4srH0ru33bzyzOXW0M7EseDC67LiytTOxLz+o6yw/Lqss6O8+9bQzsS0ytPv0+ux6rXjt/u6xaGj1tC5+tPDu6e/ydLU1f3It9TEtsHV4rbOxNrI3aGj1ti4tLLiytTE2sjd0tTM4bjfvOyy4te8yLe2yKGjCg==",
+    "content": "这是一份简体中文编码测试文件，包含常见中文词语与标点符号。中国用户可以正确阅读这段内容。重复测试内容以提高检测准确度。这是一份简体中文编码测试文件，包含常见中文词语与标点符号。中国用户可以正确阅读这段内容。重复测试内容以提高检测准确度。这是一份简体中文编码测试文件，包含常见中文词语与标点符号。中国用户可以正确阅读这段内容。重复测试内容以提高检测准确度。\n",
+    "profile": { "encoding": "gbk", "bom": "none", "eol": "lf" }
+  },
+  {
+    "name": "shift-jis-cr",
+    "bytesBase64": "grGC6oLNk/qWe4zqgsyVto6ag1KBW4NolLuS6ILwim2URoK3gumCvYLfgsyDZYNYg2eVto/NgsWCt4FCgtCC54KqgsiBQYNKg16DSoNpgUGKv46agsaL5ZPHk1+C8Ircgt+CxIFBjJ+Pb5C4k3iC8I2Cgt+C3IK3gUKCsYLqgs2T+pZ7jOqCzJW2jpqDUoFbg2iUu5LogvCKbZRGgreC6YK9gt+CzINlg1iDZ5W2j82CxYK3gUKC0ILngqqCyIFBg0qDXoNKg2mBQYq/jpqCxovlk8eTX4LwityC34LEgUGMn49vkLiTeILwjYKC34LcgreBQoKxguqCzZP6lnuM6oLMlbaOmoNSgVuDaJS7kuiC8IptlEaCt4Lpgr2C34LMg2WDWINnlbaPzYLFgreBQoLQgueCqoLIgUGDSoNeg0qDaYFBir+OmoLGi+WTx5NfgvCK3ILfgsSBQYyfj2+QuJN4gvCNgoLfgtyCt4FCDQ==",
+    "content": "これは日本語の文字コード判定を確認するためのテスト文章です。ひらがな、カタカナ、漢字と句読点を含めて、検出精度を高めます。これは日本語の文字コード判定を確認するためのテスト文章です。ひらがな、カタカナ、漢字と句読点を含めて、検出精度を高めます。これは日本語の文字コード判定を確認するためのテスト文章です。ひらがな、カタカナ、漢字と句読点を含めて、検出精度を高めます。\n",
+    "profile": { "encoding": "shift_jis", "bom": "none", "eol": "cr" }
+  }
+]

@@ -1,27 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
   AlertTriangle, BookOpen, Braces, Check, ChevronDown, ChevronRight, FileText, Menu,
   MoreHorizontal, PanelRightOpen, Save, Settings, Trash2, Unlink, X,
 } from "lucide-react";
-import type { FrontMatterState, OpenDocument, SearchHit, TiptapNode, WorkspaceEntry, WorkspaceSettings } from "./domain/types";
-import { DEFAULT_WORKSPACE_SETTINGS } from "./domain/types";
-import { parseMarkdown, serializeMarkdown } from "./markdown/pipeline";
+import type { FrontMatterState, OpenDocument, SearchHit, TiptapNode, WorkspaceEntry } from "./domain/types";
+import { parseMarkdown } from "./markdown/pipeline";
 import {
-  chooseWorkspace, createEntry, deleteEntry, errorMessage, exportWorkspace, importFolder, isSaveError, isTauri,
+  chooseWorkspace, createEntry, deleteEntry, errorMessage, exportWorkspace, importFolder, isTauri,
   readDocument, readWorkspaceSettings, renameEntry, saveDocument, scanOrphanAssets,
-  scanWorkspace, watchWorkspace, writeWorkspaceSettings,
+  scanWorkspace,
 } from "./services/desktop";
 import { validateEntryName } from "./services/entryName";
 import { rewriteIncomingLinks, rewriteOutgoingLinks } from "./services/linkRewrite";
-import { WorkspaceSearchIndex } from "./services/searchIndex";
-import { applySaveSuccess, classifySaveConflict } from "./services/saveState";
 import { reorderById } from "./services/tabOrder";
 import { replaceMatches, searchPattern } from "./services/searchReplace";
 import { shortcutAction } from "./services/keyboardShortcuts";
+import { clampPanelWidth, PANEL_LIMITS, type PanelName } from "./services/panelLimits";
 import { EditorPane } from "./components/EditorPane";
 import { PropertiesPanel } from "./components/PropertiesPanel";
-import { Sidebar } from "./components/Sidebar";
+import { Sidebar, type SearchProps } from "./components/Sidebar";
+import { documentSaveContent, leafName, openDocument, useDocumentPersistence, useDocuments } from "./hooks/useDocuments";
+import { useSaveConflict } from "./hooks/useSaveConflict";
+import { useWorkspace, useWorkspaceWatcher } from "./hooks/useWorkspace";
+import { useWorkspaceSearch } from "./hooks/useWorkspaceSearch";
+import { TAB_GROUP_COLORS, useTabGroups, type TabDropTarget } from "./hooks/useTabGroups";
 
 function flattenFiles(entries: WorkspaceEntry[]): WorkspaceEntry[] {
   return entries.flatMap((entry) => entry.kind === "file" ? [entry] : flattenFiles(entry.children ?? []));
@@ -31,25 +34,11 @@ function parentPath(path: string): string {
   return path.split("/").slice(0, -1).join("/");
 }
 
-function leafName(path: string): string {
-  return path.replace(/\\/g, "/").split("/").at(-1) ?? path;
-}
-
 function isWithin(path: string, parent: string): boolean {
   return path === parent || path.startsWith(`${parent}/`);
 }
 
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(Math.max(value, minimum), maximum);
-
-function openDocument(disk: Awaited<ReturnType<typeof readDocument>>): OpenDocument {
-  return { ...disk, id: disk.path, title: leafName(disk.relativePath), parsed: parseMarkdown(disk.content), dirty: false, saving: false, saveGeneration: 0, revision: 0, editorVersion: 0 };
-}
-
-function documentSaveContent(document: OpenDocument): string {
-  return document.parsed.mode === "compatibility"
-    ? document.parsed.source.replace(/\r\n?/g, "\n").replace(/\n*$/, "\n")
-    : serializeMarkdown(document.parsed.doc, document.parsed.frontMatter);
-}
 
 type EntryDialog = {
   mode: "create-file" | "create-directory" | "rename";
@@ -57,74 +46,60 @@ type EntryDialog = {
   entry?: WorkspaceEntry;
 };
 
-const TAB_GROUP_COLORS = ["#6b7280", "#5b8def", "#ef7d72", "#eabf3b", "#70bf8b", "#e879b0", "#b46de0", "#56c4d8", "#f0a15f"];
-
 export default function App() {
-  const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null);
-  const [settings, setSettings] = useState<WorkspaceSettings>(DEFAULT_WORKSPACE_SETTINGS);
-  const [settingsReadOnly, setSettingsReadOnly] = useState(false);
-  const [settingsWarning, setSettingsWarning] = useState<string | undefined>();
-  const [sessionReady, setSessionReady] = useState(false);
-  const [tree, setTree] = useState<WorkspaceEntry[]>([]);
-  const [documents, setDocuments] = useState<OpenDocument[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [selectedFolder, setSelectedFolder] = useState("");
+  const {
+    documents, documentsRef, activeId, activeIdRef, activeDocument, dispatch, updateDocuments,
+    selectDocument, closeTab, closeTabs, saveTimers, savingIds,
+  } = useDocuments();
+  const {
+    workspaceRoot, setWorkspaceRoot, settings, setSettings, setSettingsReadOnly,
+    settingsWarning, setSettingsWarning, setSessionReady, tree, setTree,
+    selectedFolder, setSelectedFolder, workspaceError, refreshTree, withWorkspace,
+  } = useWorkspace(documentsRef, activeIdRef);
+  const saveConflict = useSaveConflict(dispatch);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [replacementText, setReplacementText] = useState("");
-  const [searchScope, setSearchScope] = useState<"document" | "workspace">("workspace");
-  const [searchRegex, setSearchRegex] = useState(false);
-  const [searchError, setSearchError] = useState<string | undefined>();
-  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
-  const [searchTarget, setSearchTarget] = useState<{ path: string; text: string; nonce: number } | null>(null);
-  const [searchShortcut, setSearchShortcut] = useState<{ mode: "search" | "replace"; nonce: number } | null>(null);
+  const {
+    searchQuery, setSearchQuery, replacementText, setReplacementText, searchScope,
+    searchRegex, searchError, setSearchError, searchHits, setSearchHits,
+    searchTarget, setSearchTarget, searchShortcut, setSearchShortcut,
+    searchQueryRef,
+    searchIndex, indexGeneration, refreshSearchResults, indexWorkspace,
+    handleSearch, handleSearchScopeChange, handleSearchRegexChange,
+  } = useWorkspaceSearch(documentsRef, activeIdRef);
+  useWorkspaceWatcher({
+    workspaceRoot, refreshTree, documentsRef, savingIds, searchIndex, searchQueryRef,
+    dispatch, externalChange: saveConflict.externalChange, refreshSearchResults,
+  });
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [entryDialog, setEntryDialog] = useState<EntryDialog | null>(null);
-  const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
-  const [tabDropTarget, setTabDropTarget] = useState<{ type: "tab"; id: string; position: "before" | "after" } | { type: "group"; groupId: string | null } | null>(null);
-  const [groupMenu, setGroupMenu] = useState<{ id: string; left: number; top: number; draftName: string } | null>(null);
-  const documentsRef = useRef(documents);
-  const activeIdRef = useRef(activeId);
-  const saveTimers = useRef(new Map<string, number>());
-  const savingIds = useRef(new Set<string>());
-  const settingsTimer = useRef(0);
-  const indexGeneration = useRef(0);
-  const searchQueryRef = useRef(searchQuery);
-  const searchScopeRef = useRef(searchScope);
-  const searchRegexRef = useRef(searchRegex);
-  const autoSaveEnabledRef = useRef(settings.settings.autoSaveEnabled);
-  const searchIndex = useRef(new WorkspaceSearchIndex());
+  const { persist, scheduleSave } = useDocumentPersistence({
+    workspaceRoot,
+    autoSaveEnabled: settings.settings.autoSaveEnabled,
+    autoSaveDebounceMs: settings.settings.autoSaveDebounceMs,
+    documentsRef,
+    dispatch,
+    saveTimers,
+    savingIds,
+    searchIndex,
+    refreshSearchResults,
+    setToast,
+    setFatalError,
+  });
+  const {
+    draggedTabId, setDraggedTabId, tabDropTarget, setTabDropTarget, groupMenu, setGroupMenu,
+    setTabGroup, toggleTabGroup, addTabGroup, removeTabGroup, commitTabGroupName, setTabGroupColor,
+    ungroupedDocuments,
+  } = useTabGroups(documents, settings, setSettings);
   const toolsMenuRef = useRef<HTMLDivElement>(null);
   const groupMenuRef = useRef<HTMLDivElement>(null);
   const entryNameInputRef = useRef<HTMLInputElement>(null);
-  const tabDropTargetRef = useRef<typeof tabDropTarget>(null);
+  const tabDropTargetRef = useRef<TabDropTarget>(null);
   const tabPointerDragRef = useRef<{ sourceId: string; startX: number; startY: number; dragging: boolean } | null>(null);
   const suppressTabClickRef = useRef(false);
-  const activeDocument = documents.find((doc) => doc.id === activeId);
-
-  const updateDocuments = useCallback((updater: OpenDocument[] | ((current: OpenDocument[]) => OpenDocument[])) => {
-    setDocuments((current) => {
-      const next = typeof updater === "function" ? updater(current) : updater;
-      documentsRef.current = next;
-      return next;
-    });
-  }, []);
-
-  const selectDocument = useCallback((id: string | null) => {
-    activeIdRef.current = id;
-    setActiveId(id);
-  }, []);
-
-  useEffect(() => { documentsRef.current = documents; }, [documents]);
-  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
-  useEffect(() => { searchQueryRef.current = searchQuery; }, [searchQuery]);
-  useEffect(() => { searchScopeRef.current = searchScope; }, [searchScope]);
-  useEffect(() => { searchRegexRef.current = searchRegex; }, [searchRegex]);
-  useEffect(() => { autoSaveEnabledRef.current = settings.settings.autoSaveEnabled; }, [settings.settings.autoSaveEnabled]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 2800);
@@ -165,52 +140,9 @@ export default function App() {
     return () => window.cancelAnimationFrame(frame);
   }, [entryDialog?.entry?.relativePath, entryDialog?.mode]);
 
-  const refreshTree = useCallback(async (root = workspaceRoot) => {
-    if (!root) return [];
-    try {
-      const entries = await scanWorkspace(root);
-      setTree(entries);
-      return entries;
-    } catch (error) {
-      setFatalError(errorMessage(error));
-      return [];
-    }
-  }, [workspaceRoot]);
-
-  const refreshSearchResults = useCallback((query = searchQueryRef.current, regex = searchRegexRef.current, scope = searchScopeRef.current) => {
-    if (!query.trim()) {
-      setSearchError(undefined);
-      setSearchHits([]);
-      return;
-    }
-    try {
-      if (regex) searchPattern(query, true, false);
-      const active = documentsRef.current.find((doc) => doc.id === activeIdRef.current);
-      setSearchError(undefined);
-      setSearchHits(searchIndex.current.search(query, 50, regex, scope === "document" ? active?.relativePath : undefined));
-    } catch (error) {
-      setSearchError(errorMessage(error));
-      setSearchHits([]);
-    }
-  }, []);
+  useEffect(() => { if (workspaceError) setFatalError(workspaceError); }, [workspaceError]);
 
   useEffect(() => { refreshSearchResults(searchQuery, searchRegex, searchScope); }, [activeId, refreshSearchResults, searchQuery, searchRegex, searchScope]);
-
-  const indexWorkspace = useCallback(async (root: string, entries: WorkspaceEntry[]) => {
-    const generation = ++indexGeneration.current;
-    searchIndex.current.clear();
-    const files = flattenFiles(entries);
-    for (let index = 0; index < files.length; index += 8) {
-      const batch = files.slice(index, index + 8);
-      await Promise.all(batch.map(async (entry) => {
-        try {
-          const disk = await readDocument(root, entry.relativePath);
-          if (generation === indexGeneration.current) searchIndex.current.update(disk.path, disk.relativePath, disk.content);
-        } catch { /* A single unreadable file must not block the workspace. */ }
-      }));
-    }
-    if (generation === indexGeneration.current && searchQueryRef.current) refreshSearchResults();
-  }, [refreshSearchResults]);
 
   const openWorkspace = useCallback(async () => {
     if (documentsRef.current.some((doc) => doc.dirty || doc.saving) && !window.confirm("目前有尚未完成儲存的文件。仍要切換工作區嗎？")) return;
@@ -255,74 +187,6 @@ export default function App() {
     } finally { setLoading(false); }
   }, [indexWorkspace, selectDocument, updateDocuments]);
 
-  useEffect(() => {
-    if (!workspaceRoot || !sessionReady || settingsReadOnly) return;
-    window.clearTimeout(settingsTimer.current);
-    settingsTimer.current = window.setTimeout(() => {
-      const active = documentsRef.current.find((doc) => doc.id === activeIdRef.current);
-      const next: WorkspaceSettings = {
-        ...settings,
-        ui: {
-          ...settings.ui,
-          openTabs: documentsRef.current.map((doc) => doc.relativePath),
-          lastOpenedFile: active?.relativePath ?? null,
-        },
-      };
-      void writeWorkspaceSettings(workspaceRoot, next).catch((error) => setSettingsWarning(errorMessage(error)));
-    }, 400);
-    return () => window.clearTimeout(settingsTimer.current);
-  }, [activeId, documents, sessionReady, settings, settingsReadOnly, workspaceRoot]);
-
-  useEffect(() => {
-    if (!workspaceRoot) return;
-    let disposed = false;
-    let timer = 0;
-    const pendingPaths = new Set<string>();
-    let unlisten: (() => void) | undefined;
-    const normalizedRoot = workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
-    const routeChanges = async () => {
-      const changedPaths = [...pendingPaths];
-      pendingPaths.clear();
-      await refreshTree(workspaceRoot);
-      await Promise.all(changedPaths.filter((path) => /\.(?:md|markdown)$/i.test(path)).map(async (path) => {
-        const normalizedPath = path.replace(/\\/g, "/");
-        const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`) ? normalizedPath.slice(normalizedRoot.length + 1) : leafName(normalizedPath);
-        try {
-          const disk = await readDocument(workspaceRoot, relativePath);
-          searchIndex.current.update(disk.path, disk.relativePath, disk.content);
-          updateDocuments((current) => current.map((doc) => {
-            if (doc.relativePath !== relativePath || doc.hash === disk.hash || doc.saving || savingIds.current.has(doc.id)) return doc;
-            if (doc.dirty) {
-              const pendingContent = documentSaveContent(doc);
-              const classification = classifySaveConflict(doc.content, pendingContent, disk.content);
-              if (classification === "already-saved") {
-                return { ...applySaveSuccess(doc, doc.revision, pendingContent, { hash: disk.hash, saveGeneration: doc.saveGeneration + 1 }), profile: disk.profile, size: disk.size };
-              }
-              if (classification === "stale-hash") {
-                return { ...doc, hash: disk.hash, profile: disk.profile, size: disk.size, conflict: undefined };
-              }
-              return { ...doc, conflict: { diskHash: disk.hash, diskContent: disk.content } };
-            }
-            return { ...doc, ...disk, parsed: parseMarkdown(disk.content), conflict: undefined, revision: doc.revision + 1, editorVersion: doc.editorVersion + 1 };
-          }));
-        } catch {
-          const affected = documentsRef.current.find((doc) => doc.relativePath === relativePath);
-          if (affected) searchIndex.current.remove(affected.path);
-          updateDocuments((current) => current.map((doc) => doc.relativePath === relativePath
-            ? { ...doc, conflict: { diskHash: "deleted", diskContent: "" } }
-            : doc));
-        }
-      }));
-      if (searchQueryRef.current) refreshSearchResults();
-    };
-    void watchWorkspace(workspaceRoot, (event) => {
-      event.paths.forEach((path) => pendingPaths.add(path));
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => { if (!disposed) void routeChanges(); }, 180);
-    }).then((stop) => { unlisten = stop; });
-    return () => { disposed = true; window.clearTimeout(timer); unlisten?.(); };
-  }, [refreshSearchResults, refreshTree, updateDocuments, workspaceRoot]);
-
   const openFile = useCallback(async (entry: WorkspaceEntry, keepSearchTarget = false) => {
     if (!workspaceRoot || entry.kind !== "file") return;
     const existing = documentsRef.current.find((doc) => doc.relativePath === entry.relativePath);
@@ -345,89 +209,6 @@ export default function App() {
     if (window.innerWidth <= 850) setSidebarOpen(false);
   }, [selectDocument, settings.ui.tabAssignments, updateDocuments, workspaceRoot]);
 
-  const persist = useCallback(async (id: string, force = false) => {
-    const root = workspaceRoot;
-    const doc = documentsRef.current.find((item) => item.id === id);
-    if (!root || !doc || (!doc.dirty && !force) || savingIds.current.has(id)) return;
-    const pendingTimer = saveTimers.current.get(id);
-    if (pendingTimer) window.clearTimeout(pendingTimer);
-    saveTimers.current.delete(id);
-    const revision = doc.revision;
-    const content = documentSaveContent(doc);
-    savingIds.current.add(id);
-    updateDocuments((current) => current.map((item) => item.id === id ? { ...item, saving: true } : item));
-    let succeeded = false;
-    try {
-      const result = await saveDocument({ root, relativePath: doc.relativePath, content, expectedHash: doc.hash, profile: doc.profile, force, saveGeneration: doc.saveGeneration });
-      succeeded = true;
-      updateDocuments((current) => current.map((item) => {
-        if (item.id !== id) return item;
-        return applySaveSuccess(item, revision, content, result);
-      }));
-      searchIndex.current.update(doc.path, doc.relativePath, content);
-      if (searchQueryRef.current) refreshSearchResults();
-      setToast("已安全儲存");
-    } catch (error) {
-      if (isSaveError(error) && error.kind === "Conflict") {
-        try {
-          const disk = await readDocument(root, doc.relativePath);
-          const classification = classifySaveConflict(doc.content, content, disk.content);
-          if (classification === "already-saved") {
-            succeeded = true;
-            updateDocuments((current) => current.map((item) => item.id === id
-              ? { ...applySaveSuccess(item, revision, content, { hash: disk.hash, saveGeneration: item.saveGeneration + 1 }), profile: disk.profile }
-              : item));
-            searchIndex.current.update(doc.path, doc.relativePath, content);
-          } else if (classification === "stale-hash") {
-            succeeded = true;
-            updateDocuments((current) => current.map((item) => item.id === id
-              ? { ...item, hash: disk.hash, profile: disk.profile, saving: false, conflict: undefined }
-              : item));
-          } else {
-            updateDocuments((current) => current.map((item) => item.id === id ? {
-              ...item,
-              saving: false,
-              conflict: { diskHash: disk.hash, diskContent: disk.content },
-            } : item));
-          }
-        } catch {
-          updateDocuments((current) => current.map((item) => item.id === id ? {
-            ...item,
-            saving: false,
-            conflict: { diskHash: "deleted", diskContent: "" },
-          } : item));
-        }
-        setFatalError(null);
-      } else {
-        updateDocuments((current) => current.map((item) => item.id === id ? { ...item, saving: false } : item));
-        setFatalError(errorMessage(error));
-      }
-    } finally {
-      savingIds.current.delete(id);
-      if (succeeded) window.setTimeout(() => {
-        const latest = documentsRef.current.find((item) => item.id === id);
-        if (autoSaveEnabledRef.current && latest?.dirty && !latest.conflict) void persist(id);
-      }, 0);
-    }
-  }, [refreshSearchResults, updateDocuments, workspaceRoot]);
-
-  const scheduleSave = useCallback((id: string) => {
-    if (!settings.settings.autoSaveEnabled) return;
-    const previous = saveTimers.current.get(id);
-    if (previous) window.clearTimeout(previous);
-    const timer = window.setTimeout(() => { saveTimers.current.delete(id); void persist(id); }, settings.settings.autoSaveDebounceMs);
-    saveTimers.current.set(id, timer);
-  }, [persist, settings.settings.autoSaveDebounceMs, settings.settings.autoSaveEnabled]);
-
-  useEffect(() => {
-    if (!settings.settings.autoSaveEnabled) {
-      saveTimers.current.forEach((timer) => window.clearTimeout(timer));
-      saveTimers.current.clear();
-      return;
-    }
-    documentsRef.current.filter((doc) => doc.dirty && !doc.saving && !doc.conflict).forEach((doc) => scheduleSave(doc.id));
-  }, [scheduleSave, settings.settings.autoSaveEnabled]);
-
   const markChanged = (id: string, update: (item: OpenDocument) => OpenDocument) => {
     const current = documentsRef.current.find((item) => item.id === id);
     if (!current) return;
@@ -448,51 +229,19 @@ export default function App() {
     if (activeId) markChanged(activeId, (item) => ({ ...item, parsed: { ...item.parsed, frontMatter } }));
   };
 
-  const closeTab = useCallback(async (id: string) => {
-    const current = documentsRef.current;
-    const index = current.findIndex((item) => item.id === id);
-    const doc = current[index];
-    if ((doc?.dirty || doc?.saving) && !window.confirm(`${doc.title} 尚未完成儲存。仍要關閉分頁並捨棄未儲存內容嗎？`)) return;
-    const timer = saveTimers.current.get(id);
-    if (timer) window.clearTimeout(timer);
-    saveTimers.current.delete(id);
-    const remaining = current.filter((item) => item.id !== id);
-    updateDocuments(remaining);
-    if (activeIdRef.current === id) selectDocument(remaining[index]?.id ?? remaining[index - 1]?.id ?? null);
-  }, [selectDocument, updateDocuments]);
-
-  const closeTabs = useCallback((ids: string[]): boolean => {
-    const targets = new Set(ids);
-    if (!targets.size) return true;
-    const current = documentsRef.current;
-    const affected = current.filter((doc) => targets.has(doc.id));
-    const unsavedCount = affected.filter((doc) => doc.dirty || doc.saving).length;
-    if (unsavedCount > 0 && !window.confirm(`有 ${unsavedCount} 個檔案尚未完成儲存，仍要關閉嗎？`)) return false;
-    affected.forEach((doc) => {
-      const timer = saveTimers.current.get(doc.id);
-      if (timer) window.clearTimeout(timer);
-      saveTimers.current.delete(doc.id);
-    });
-    const remaining = current.filter((doc) => !targets.has(doc.id));
-    updateDocuments(remaining);
-    if (activeIdRef.current && targets.has(activeIdRef.current)) selectDocument(remaining.at(-1)?.id ?? null);
-    return true;
-  }, [selectDocument, updateDocuments]);
-
-  const reloadFromDisk = async (id: string) => {
-    if (!workspaceRoot) return;
+  const reloadFromDisk = withWorkspace(async (root, id: string) => {
     const doc = documentsRef.current.find((item) => item.id === id);
     if (!doc) return;
     try {
-      const disk = await readDocument(workspaceRoot, doc.relativePath);
-      updateDocuments((current) => current.map((item) => item.id === id ? { ...item, ...disk, parsed: parseMarkdown(disk.content), dirty: false, saving: false, conflict: undefined, revision: item.revision + 1, editorVersion: item.editorVersion + 1 } : item));
+      const disk = await readDocument(root, doc.relativePath);
+      saveConflict.reloadFromDisk(id, disk);
       searchIndex.current.update(disk.path, disk.relativePath, disk.content);
       setToast("已重新載入磁碟版本");
     } catch (error) { setFatalError(errorMessage(error)); }
-  };
+  });
 
-  const submitEntryDialog = async () => {
-    if (!workspaceRoot || !entryDialog) return;
+  const submitEntryDialog = withWorkspace(async (root) => {
+    if (!entryDialog) return;
     const raw = entryDialog.value.trim();
     if (!raw) return;
     const validationError = validateEntryName(raw);
@@ -506,7 +255,7 @@ export default function App() {
       const name = kind === "file" && !/\.(?:md|markdown)$/i.test(raw) ? `${raw}.md` : raw;
       const relativePath = [selectedFolder, name].filter(Boolean).join("/");
       try {
-        await createEntry(workspaceRoot, relativePath, kind);
+        await createEntry(root, relativePath, kind);
         const entries = await refreshTree();
         if (kind === "file") {
           const entry = flattenFiles(entries).find((item) => item.relativePath === relativePath);
@@ -533,19 +282,19 @@ export default function App() {
       newPath: `${target}${file.relativePath.slice(entry.relativePath.length)}`,
     }));
     try {
-      await renameEntry(workspaceRoot, entry.relativePath, target);
-      const entries = await scanWorkspace(workspaceRoot);
+      await renameEntry(root, entry.relativePath, target);
+      const entries = await scanWorkspace(root);
       for (const file of flattenFiles(entries)) {
-        const disk = await readDocument(workspaceRoot, file.relativePath);
+        const disk = await readDocument(root, file.relativePath);
         const moved = movedPairs.find((pair) => pair.newPath === file.relativePath);
         let content = moved ? rewriteOutgoingLinks(disk.content, moved.oldPath, moved.newPath) : disk.content;
         for (const pair of movedPairs) content = rewriteIncomingLinks(content, file.relativePath, pair.oldPath, pair.newPath);
-        if (content !== disk.content) await saveDocument({ root: workspaceRoot, relativePath: file.relativePath, content, expectedHash: disk.hash, profile: disk.profile, saveGeneration: 0 });
+        if (content !== disk.content) await saveDocument({ root, relativePath: file.relativePath, content, expectedHash: disk.hash, profile: disk.profile, saveGeneration: 0 });
       }
       const current = documentsRef.current;
       const refreshed = await Promise.all(current.map(async (doc) => {
         const pair = movedPairs.find((item) => item.oldPath === doc.relativePath);
-        return openDocument(await readDocument(workspaceRoot, pair?.newPath ?? doc.relativePath));
+        return openDocument(await readDocument(root, pair?.newPath ?? doc.relativePath));
       }));
       const oldActive = current.find((doc) => doc.id === activeIdRef.current)?.relativePath;
       const newActivePath = movedPairs.find((pair) => pair.oldPath === oldActive)?.newPath ?? oldActive;
@@ -564,13 +313,12 @@ export default function App() {
           })),
         },
       }));
-      void indexWorkspace(workspaceRoot, entries);
+      void indexWorkspace(root, entries);
       setToast("已重新命名並更新相對連結");
     } catch (error) { setFatalError(errorMessage(error)); }
-  };
+  });
 
-  const handleDelete = async (entry: WorkspaceEntry) => {
-    if (!workspaceRoot) return;
+  const handleDelete = withWorkspace(async (root, entry: WorkspaceEntry) => {
     const affected = documentsRef.current.filter((doc) => isWithin(doc.relativePath, entry.relativePath));
     const details = entry.kind === "directory"
       ? "此資料夾可能包含檔案樹未顯示的圖片與其他檔案；整個資料夾都會移至資源回收桶。"
@@ -578,7 +326,7 @@ export default function App() {
     const unsaved = affected.some((doc) => doc.dirty || doc.saving) ? " 尚有未儲存內容，將一併捨棄。" : "";
     if (!window.confirm(`確定刪除「${entry.relativePath}」？${details}${unsaved}`)) return;
     try {
-      await deleteEntry(workspaceRoot, entry.relativePath);
+      await deleteEntry(root, entry.relativePath);
       affected.forEach((doc) => {
         const timer = saveTimers.current.get(doc.id);
         if (timer) window.clearTimeout(timer);
@@ -592,25 +340,10 @@ export default function App() {
       await refreshTree();
       setToast("已移至資源回收桶");
     } catch (error) { setFatalError(errorMessage(error)); }
-  };
+  });
 
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    refreshSearchResults(query, searchRegex, searchScope);
-  };
-
-  const handleSearchScopeChange = (scope: "document" | "workspace") => {
-    setSearchScope(scope);
-    refreshSearchResults(searchQuery, searchRegex, scope);
-  };
-
-  const handleSearchRegexChange = (enabled: boolean) => {
-    setSearchRegex(enabled);
-    refreshSearchResults(searchQuery, enabled, searchScope);
-  };
-
-  const handleReplaceAll = async () => {
-    if (!workspaceRoot || !searchQuery.trim()) return;
+  const handleReplaceAll = withWorkspace(async (root) => {
+    if (!searchQuery.trim()) return;
     try { searchPattern(searchQuery, searchRegex, true); }
     catch (error) { setSearchError(errorMessage(error)); return; }
 
@@ -636,7 +369,7 @@ export default function App() {
     try {
       const changes: Array<{ disk: Awaited<ReturnType<typeof readDocument>>; content: string; count: number }> = [];
       for (const file of flattenFiles(tree)) {
-        const disk = await readDocument(workspaceRoot, file.relativePath);
+        const disk = await readDocument(root, file.relativePath);
         const result = replaceMatches(disk.content, searchQuery, replacementText, searchRegex);
         if (result.count) changes.push({ disk, content: result.content, count: result.count });
       }
@@ -644,68 +377,58 @@ export default function App() {
       if (!total) { setToast("工作區沒有可取代的結果"); return; }
       if (!window.confirm(`將在 ${changes.length} 個檔案中取代 ${total} 處。此操作會建立檔案快照，確定繼續嗎？`)) return;
       for (const change of changes) {
-        const saved = await saveDocument({ root: workspaceRoot, relativePath: change.disk.relativePath, content: change.content, expectedHash: change.disk.hash, profile: change.disk.profile, saveGeneration: 0 });
+        const saved = await saveDocument({ root, relativePath: change.disk.relativePath, content: change.content, expectedHash: change.disk.hash, profile: change.disk.profile, saveGeneration: 0 });
         searchIndex.current.update(change.disk.path, change.disk.relativePath, change.content);
-        updateDocuments((current) => current.map((doc) => doc.relativePath === change.disk.relativePath ? {
-          ...doc,
-          content: change.content,
-          hash: saved.hash,
-          profile: change.disk.profile,
-          parsed: parseMarkdown(change.content),
-          dirty: false,
-          saving: false,
-          saveGeneration: saved.saveGeneration,
-          revision: doc.revision + 1,
-          editorVersion: doc.editorVersion + 1,
-          conflict: undefined,
-        } : doc));
+        const open = documentsRef.current.find((doc) => doc.relativePath === change.disk.relativePath);
+        if (open) dispatch({
+          type: "SAVE_SUCCESS",
+          id: open.id,
+          result: { revision: open.revision, content: change.content, hash: saved.hash, saveGeneration: saved.saveGeneration, profile: change.disk.profile, refreshParsed: true },
+        });
       }
       refreshSearchResults();
       setToast(`已在 ${changes.length} 個檔案中取代 ${total} 處`);
     } catch (error) { setFatalError(errorMessage(error)); }
     finally { setLoading(false); }
-  };
+  });
 
   const handleSearchHit = async (hit: SearchHit) => {
     setSearchTarget({ path: hit.relativePath, text: hit.rawLineText, nonce: Date.now() });
     await openFile({ name: leafName(hit.relativePath), path: hit.filePath, relativePath: hit.relativePath, kind: "file", size: 0, modifiedAt: 0 }, true);
   };
 
-  const handleImport = async () => {
-    if (!workspaceRoot) return;
+  const handleImport = withWorkspace(async (root) => {
     setToolsOpen(false);
     setLoading(true);
     try {
-      const report = await importFolder(workspaceRoot);
+      const report = await importFolder(root);
       if (!report) return;
       const entries = await refreshTree();
-      void indexWorkspace(workspaceRoot, entries);
+      void indexWorkspace(root, entries);
       setToast(`匯入完成：${report.succeeded} 成功、${report.failed} 失敗`);
       if (report.failed > 0) setFatalError(report.files.filter((file) => file.status === "failed").slice(0, 8).map((file) => `${file.relativePath}: ${file.error}`).join("\n"));
     } catch (error) { setFatalError(errorMessage(error)); }
     finally { setLoading(false); }
-  };
+  });
 
-  const handleExport = async () => {
-    if (!workspaceRoot) return;
+  const handleExport = withWorkspace(async (root) => {
     setToolsOpen(false);
     setLoading(true);
     try {
-      const completed = await exportWorkspace(workspaceRoot, settings.workspaceName);
+      const completed = await exportWorkspace(root, settings.workspaceName);
       if (completed) setToast("Workspace ZIP 已匯出");
     } catch (error) { setFatalError(errorMessage(error)); }
     finally { setLoading(false); }
-  };
+  });
 
-  const handleOrphanScan = async () => {
-    if (!workspaceRoot) return;
+  const handleOrphanScan = withWorkspace(async (root) => {
     setToolsOpen(false);
     try {
-      const orphaned = await scanOrphanAssets(workspaceRoot);
+      const orphaned = await scanOrphanAssets(root);
       setToast(orphaned.length ? `找到 ${orphaned.length} 個孤兒資源；未刪除任何檔案` : "沒有孤兒資源");
       if (orphaned.length) setFatalError(`孤兒資源（僅列出，未刪除）：\n${orphaned.slice(0, 20).join("\n")}`);
     } catch (error) { setFatalError(errorMessage(error)); }
-  };
+  });
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -737,53 +460,6 @@ export default function App() {
 
   const reorderTab = (sourceId: string, targetId: string, position: "before" | "after") => {
     updateDocuments((current) => reorderById(current, sourceId, targetId, position));
-  };
-
-  const setTabGroup = (relativePath: string, groupId: string | null) => {
-    setSettings((current) => {
-      const assignments = { ...current.ui.tabAssignments };
-      if (groupId) assignments[relativePath] = groupId;
-      else delete assignments[relativePath];
-      return { ...current, ui: { ...current.ui, tabAssignments: assignments } };
-    });
-  };
-
-  const addTabGroup = () => {
-    setSettings((current) => {
-      const used = new Set(current.ui.tabGroups.map((group) => group.name));
-      let number = 1;
-      while (used.has(`群組 ${number}`)) number += 1;
-      const group = { id: `group-${Date.now()}-${number}`, name: `群組 ${number}`, color: TAB_GROUP_COLORS[1], collapsed: false };
-      return { ...current, ui: { ...current.ui, tabGroups: [...current.ui.tabGroups, group] } };
-    });
-  };
-
-  const toggleTabGroup = (groupId: string) => {
-    setSettings((current) => ({ ...current, ui: { ...current.ui, tabGroups: current.ui.tabGroups.map((group) => group.id === groupId ? { ...group, collapsed: !group.collapsed } : group) } }));
-  };
-
-  const removeTabGroup = (groupId: string) => {
-    setSettings((current) => ({
-      ...current,
-      ui: {
-        ...current.ui,
-        tabGroups: current.ui.tabGroups.filter((group) => group.id !== groupId),
-        tabAssignments: Object.fromEntries(Object.entries(current.ui.tabAssignments).filter(([, assigned]) => assigned !== groupId)),
-      },
-    }));
-  };
-
-  const commitTabGroupName = () => {
-    if (!groupMenu) return;
-    const name = groupMenu.draftName.trim();
-    const currentName = settings.ui.tabGroups.find((group) => group.id === groupMenu.id)?.name ?? "群組";
-    if (!name) { setGroupMenu({ ...groupMenu, draftName: currentName }); return; }
-    setSettings((current) => ({ ...current, ui: { ...current.ui, tabGroups: current.ui.tabGroups.map((group) => group.id === groupMenu.id ? { ...group, name } : group) } }));
-    setGroupMenu((current) => current ? { ...current, draftName: name } : current);
-  };
-
-  const setTabGroupColor = (groupId: string, color: string) => {
-    setSettings((current) => ({ ...current, ui: { ...current.ui, tabGroups: current.ui.tabGroups.map((group) => group.id === groupId ? { ...group, color } : group) } }));
   };
 
   const closeTabGroup = (groupId: string) => {
@@ -861,19 +537,19 @@ export default function App() {
     document.addEventListener("pointercancel", finishTabPointerDrag, { once: true });
   };
 
-  const setPanelWidth = (panel: "sidebar" | "properties", width: number) => {
+  const setPanelWidth = (panel: PanelName, width: number) => {
     setSettings((current) => ({
       ...current,
       ui: {
         ...current.ui,
         [panel === "sidebar" ? "sidebarWidth" : "propertiesWidth"]: panel === "sidebar"
-          ? clamp(width, 224, 420)
-          : clamp(width, 240, 480),
+          ? clampPanelWidth("sidebar", width)
+          : clampPanelWidth("properties", width),
       },
     }));
   };
 
-  const beginPanelResize = (panel: "sidebar" | "properties", event: ReactPointerEvent<HTMLDivElement>) => {
+  const beginPanelResize = (panel: PanelName, event: ReactPointerEvent<HTMLDivElement>) => {
     if (window.innerWidth <= 850) return;
     event.preventDefault();
     const startX = event.clientX;
@@ -884,9 +560,8 @@ export default function App() {
       const occupied = panel === "sidebar"
         ? (propertiesOpen ? settings.ui.propertiesWidth : 0)
         : (sidebarOpen ? settings.ui.sidebarWidth : 0);
-      const minimum = panel === "sidebar" ? 224 : 240;
-      const configuredMaximum = panel === "sidebar" ? 420 : 480;
-      const maximum = Math.max(minimum, Math.min(configuredMaximum, window.innerWidth - occupied - 420));
+      const { minimum, maximum: configuredMaximum } = PANEL_LIMITS[panel];
+      const maximum = Math.max(minimum, Math.min(configuredMaximum, window.innerWidth - occupied - PANEL_LIMITS.editorMinimum));
       setPanelWidth(panel, clamp(requested, minimum, maximum));
     };
     const finish = () => {
@@ -899,7 +574,7 @@ export default function App() {
     document.addEventListener("pointerup", finish, { once: true });
   };
 
-  const resizeHandleKeyDown = (panel: "sidebar" | "properties", event: ReactKeyboardEvent<HTMLDivElement>) => {
+  const resizeHandleKeyDown = (panel: PanelName, event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
     const direction = event.key === "ArrowRight" ? 1 : -1;
@@ -907,8 +582,6 @@ export default function App() {
     setPanelWidth(panel, current + direction * (panel === "sidebar" ? 12 : -12));
   };
 
-  const knownGroupIds = new Set(settings.ui.tabGroups.map((group) => group.id));
-  const ungroupedDocuments = documents.filter((doc) => !knownGroupIds.has(settings.ui.tabAssignments[doc.relativePath] ?? ""));
   const renderTab = (doc: OpenDocument) => (
     <div
       className={`tab${doc.id === activeId ? " active" : ""}${doc.id === draggedTabId ? " dragging" : ""}${tabDropTarget?.type === "tab" && tabDropTarget.id === doc.id ? ` drop-${tabDropTarget.position}` : ""}`}
@@ -936,6 +609,34 @@ export default function App() {
   );
 
   const breadcrumbs = useMemo(() => activeDocument?.relativePath.split("/") ?? [], [activeDocument?.relativePath]);
+  const sidebarSearch = useMemo<SearchProps>(() => ({
+    query: searchQuery,
+    replacementText,
+    scope: searchScope,
+    regex: searchRegex,
+    error: searchError,
+    hits: searchHits,
+    shortcut: searchShortcut,
+    onQueryChange: handleSearch,
+    onReplacementChange: setReplacementText,
+    onScopeChange: handleSearchScopeChange,
+    onRegexChange: handleSearchRegexChange,
+    onReplaceAll: () => void handleReplaceAll(),
+    onOpenHit: (hit) => void handleSearchHit(hit),
+  }), [
+    handleReplaceAll,
+    handleSearch,
+    handleSearchHit,
+    handleSearchRegexChange,
+    handleSearchScopeChange,
+    replacementText,
+    searchError,
+    searchHits,
+    searchQuery,
+    searchRegex,
+    searchScope,
+    searchShortcut,
+  ]);
 
   if (!workspaceRoot) {
     return (
@@ -953,13 +654,20 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" style={{
+      "--sidebar-min": `${PANEL_LIMITS.sidebar.minimum}px`,
+      "--sidebar-max": `${PANEL_LIMITS.sidebar.maximum}px`,
+      "--sidebar-default": `${PANEL_LIMITS.sidebar.default}px`,
+      "--properties-min": `${PANEL_LIMITS.properties.minimum}px`,
+      "--properties-max": `${PANEL_LIMITS.properties.maximum}px`,
+      "--properties-default": `${PANEL_LIMITS.properties.default}px`,
+      "--editor-min": `${PANEL_LIMITS.editorMinimum}px`,
+    } as CSSProperties}>
       {sidebarOpen && <Sidebar
         width={settings.ui.sidebarWidth}
         workspaceName={settings.workspaceName} entries={tree} activePath={activeDocument?.relativePath} selectedFolder={selectedFolder}
-        expandedFolders={settings.ui.expandedFolders} searchQuery={searchQuery} replacementText={replacementText} searchScope={searchScope} searchRegex={searchRegex} searchError={searchError} searchHits={searchHits} searchShortcut={searchShortcut}
-        onSearch={handleSearch} onReplacementChange={setReplacementText} onSearchScopeChange={handleSearchScopeChange} onSearchRegexChange={handleSearchRegexChange} onReplaceAll={() => void handleReplaceAll()}
-        onOpenSearch={(hit) => void handleSearchHit(hit)} onOpen={(entry) => void openFile(entry)} onSelectFolder={setSelectedFolder}
+        expandedFolders={settings.ui.expandedFolders} search={sidebarSearch}
+        onOpen={(entry) => void openFile(entry)} onSelectFolder={setSelectedFolder}
         onToggleFolder={(path) => setSettings((current) => ({ ...current, ui: { ...current.ui, expandedFolders: current.ui.expandedFolders.includes(path) ? current.ui.expandedFolders.filter((item) => item !== path) : [...current.ui.expandedFolders, path] } }))}
         onRefresh={() => void refreshTree()} onCreate={(kind) => setEntryDialog({ mode: kind === "file" ? "create-file" : "create-directory", value: kind === "file" ? "未命名.md" : "新資料夾" })}
         onRename={(entry) => setEntryDialog({ mode: "rename", value: entry.name, entry })} onDelete={(entry) => void handleDelete(entry)} onCollapse={() => setSidebarOpen(false)}

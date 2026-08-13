@@ -6,6 +6,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { parseMarkdown, semanticRoundTrip, serializeMarkdown } from "../src/markdown/pipeline";
 import { containsUnsafeHtml, sanitizeHtml } from "../src/services/htmlSanitizer";
+import { NODE_REGISTRY, isRegisteredTiptapNode, isSupportedMdastNode } from "../src/markdown/nodeRegistry";
 
 const fixture = (name: string) => readFileSync(resolve(process.cwd(), "tests", "fixtures", name), "utf8");
 
@@ -98,5 +99,15 @@ describe("property-based supported subset", () => {
         return semanticRoundTrip(source).equal;
       },
     ), { numRuns: 100, seed: 20260807 });
+  });
+});
+
+describe("Markdown node registry", () => {
+  it("is the single support source for validation and both adapters", () => {
+    expect(isSupportedMdastNode("heading")).toBe(true);
+    expect(NODE_REGISTRY.heading.toTiptap).toBeTypeOf("function");
+    expect(NODE_REGISTRY.heading.toMdast).toBeTypeOf("function");
+    expect(isRegisteredTiptapNode("heading")).toBe(true);
+    expect(NODE_REGISTRY.footnote.supported).toBe(false);
   });
 });

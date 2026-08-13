@@ -113,6 +113,8 @@ export interface WorkspaceSettings {
   };
 }
 
+import panelLimits from "../../shared/panel-limits.json";
+
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   version: 1,
   workspaceName: "Notes",
@@ -124,5 +126,5 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
     exportMode: "strict",
     openFolderFileFormatPolicy: "preserve",
   },
-  ui: { expandedFolders: [], lastOpenedFile: null, openTabs: [], sidebarWidth: 276, propertiesWidth: 288, tabGroups: [], tabAssignments: {} },
+  ui: { expandedFolders: [], lastOpenedFile: null, openTabs: [], sidebarWidth: panelLimits.sidebar.default, propertiesWidth: panelLimits.properties.default, tabGroups: [], tabAssignments: {} },
 };

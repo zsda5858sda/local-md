@@ -1,23 +1,7 @@
 import type { Root } from "mdast";
 import type { MarkdownIssue, SourcePosition } from "../domain/types";
 import { containsUnsafeHtml } from "../services/htmlSanitizer";
-
-type MdNode = {
-  type: string;
-  value?: string;
-  children?: MdNode[];
-  position?: {
-    start: { line: number; column: number; offset?: number };
-    end: { line: number; column: number; offset?: number };
-  };
-  [key: string]: unknown;
-};
-
-const SUPPORTED = new Set([
-  "root", "paragraph", "text", "heading", "break", "strong", "emphasis",
-  "delete", "inlineCode", "code", "list", "listItem", "blockquote",
-  "thematicBreak", "link", "image", "table", "tableRow", "tableCell",
-]);
+import { isSupportedMdastNode, type MdNode } from "./nodeRegistry";
 
 const REFERENCE_NODES = new Set(["definition", "linkReference", "imageReference"]);
 const SAFE_INLINE_HTML = /^<\/?u>$/i;
@@ -81,7 +65,7 @@ export function validateAndPreserve(root: Root, source: string): ValidationResul
       }
       return;
     }
-    if (!SUPPORTED.has(node.type) && node.type !== "rawMarkdown") {
+    if (!isSupportedMdastNode(node.type)) {
       compatibility = true;
       issues.push(issue(node, `MDAST node「${node.type}」不在 v1 allowlist。`, false));
       return;

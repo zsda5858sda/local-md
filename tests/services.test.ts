@@ -9,8 +9,18 @@ import { shortcutAction } from "../src/services/keyboardShortcuts";
 import { errorMessage, isSaveError } from "../src/services/desktop";
 import { validateEntryName } from "../src/services/entryName";
 import type { OpenDocument } from "../src/domain/types";
+import encodingVectors from "../shared/encoding-vectors.json";
+import panelLimits from "../shared/panel-limits.json";
+import { PANEL_LIMITS, clampPanelWidth } from "../src/services/panelLimits";
+import { documentReducer, openDocument } from "../src/hooks/useDocuments";
+import { parseMarkdown } from "../src/markdown/pipeline";
 
 describe("FileFormatProfile", () => {
+  it.each(encodingVectors)("matches shared encoding vector $name", (vector) => {
+    const decoded = decodeFile(Uint8Array.from(Buffer.from(vector.bytesBase64, "base64")), 0);
+    expect(decoded.text).toBe(vector.content);
+    expect(decoded.profile).toEqual(vector.profile);
+  });
   it("round-trips UTF-8 LF", () => {
     const source = "中文 😀\nsecond\n";
     const encoded = encodeFile(source, UTF8_LF);
@@ -30,6 +40,14 @@ describe("FileFormatProfile", () => {
 
   it("blocks lossy Big5 saves", () => {
     expect(() => encodeFile("emoji 😀", { encoding: "big5", bom: "none", eol: "lf" })).toThrow(/UTF-8|無法表示/);
+  });
+});
+
+describe("shared panel limits", () => {
+  it("uses the JSON rules in the frontend", () => {
+    expect(PANEL_LIMITS).toEqual(panelLimits);
+    expect(clampPanelWidth("sidebar", 0)).toBe(panelLimits.sidebar.minimum);
+    expect(clampPanelWidth("properties", 999)).toBe(panelLimits.properties.maximum);
   });
 });
 
@@ -143,6 +161,40 @@ describe("autosave revisions", () => {
 
   it("reports a conflict only for a real content change", () => {
     expect(classifySaveConflict("old\n", "mine\n", "theirs\n")).toBe("external-change");
+  });
+});
+
+describe("document reducer", () => {
+  const disk = (content: string, hash: string) => ({
+    path: "C:/notes/a.md", relativePath: "a.md", content, hash, size: content.length,
+    profile: { encoding: "utf-8", bom: "none", eol: "lf" } as const,
+  });
+
+  it("classifies external changes in one reducer path", () => {
+    const document = { ...openDocument(disk("old\n", "old-hash")), dirty: true, parsed: parseMarkdown("mine\n") };
+    const [next] = documentReducer([document], { type: "EXTERNAL_CHANGE", id: document.id, disk: disk("theirs\n", "new-hash") });
+    expect(next.conflict).toEqual({ diskHash: "new-hash", diskContent: "theirs\n" });
+  });
+
+  it("finishes the saving state and exposes a save conflict", () => {
+    const document = { ...openDocument(disk("old\n", "old-hash")), dirty: true, saving: true, parsed: parseMarkdown("mine\n") };
+    const [next] = documentReducer([document], { type: "SAVE_CONFLICT", id: document.id, disk: disk("theirs\n", "new-hash") });
+    expect(next.saving).toBe(false);
+    expect(next.conflict).toEqual({ diskHash: "new-hash", diskContent: "theirs\n" });
+  });
+
+  it("still ignores watcher changes while a save is running", () => {
+    const document = { ...openDocument(disk("old\n", "old-hash")), dirty: true, saving: true, parsed: parseMarkdown("mine\n") };
+    const [next] = documentReducer([document], { type: "EXTERNAL_CHANGE", id: document.id, disk: disk("theirs\n", "new-hash") });
+    expect(next).toBe(document);
+  });
+
+  it("reloads disk state through the explicit action", () => {
+    const document = { ...openDocument(disk("old\n", "old-hash")), dirty: true };
+    const [next] = documentReducer([document], { type: "RELOAD_FROM_DISK", id: document.id, disk: disk("disk\n", "disk-hash") });
+    expect(next.content).toBe("disk\n");
+    expect(next.dirty).toBe(false);
+    expect(next.editorVersion).toBe(1);
   });
 });
 

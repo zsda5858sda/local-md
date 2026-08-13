@@ -8,6 +8,7 @@ import type { FrontMatterState, ParsedMarkdown, TiptapNode } from "../domain/typ
 import { extractFrontMatter, serializeFrontMatter } from "./frontmatter";
 import { validateAndPreserve } from "./allowlist";
 import { mdastToTiptap, tiptapToMdast } from "./adapter";
+import { isRegisteredTiptapNode } from "./nodeRegistry";
 
 const parser = unified().use(remarkParse).use(remarkGfm, { singleTilde: false });
 const stringifier = unified()
@@ -60,7 +61,7 @@ function pullRawNodes(root: Root): { root: Root; replacements: Map<string, strin
   const replacements = new Map<string, string>();
   const mdRoot = root as unknown as { children: Array<Record<string, unknown>> };
   mdRoot.children = mdRoot.children.map((node, index) => {
-    if (node.type !== "rawMarkdown") return node;
+    if (!isRegisteredTiptapNode(String(node.type)) || node.type !== "rawMarkdown") return node;
     const marker = `<!--LOCAL_MD_RAW_${index}-->`;
     replacements.set(marker, String(node.value ?? ""));
     return { type: "html", value: marker };
