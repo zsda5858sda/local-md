@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import { parseMarkdown, semanticRoundTrip, serializeMarkdown } from "../src/markdown/pipeline";
 import { containsUnsafeHtml, sanitizeHtml } from "../src/services/htmlSanitizer";
 import { NODE_REGISTRY, isRegisteredTiptapNode, isSupportedMdastNode } from "../src/markdown/nodeRegistry";
+import { createSafeImageNodeView } from "../src/editor/extensions";
+import type { TiptapNode } from "../src/domain/types";
 
 const fixture = (name: string) => readFileSync(resolve(process.cwd(), "tests", "fixtures", name), "utf8");
 
@@ -83,6 +85,67 @@ describe("canonical Markdown round-trip", () => {
   it("sanitizes the complete pasted HTML against a fixed allowlist", () => {
     const sanitized = sanitizeHtml('<p class="x"><strong>safe</strong><img src="data:image/svg+xml,evil" onerror="alert(1)"><a href="javascript:alert(1)">link</a></p>');
     expect(sanitized).toBe("<p><strong>safe</strong><img><a>link</a></p>");
+  });
+
+  it("preserves every paragraph entered in a table cell", () => {
+    const doc: TiptapNode = {
+      type: "doc",
+      content: [{
+        type: "table",
+        attrs: { align: [null] },
+        content: [
+          { type: "tableRow", content: [{ type: "tableHeader", content: [{ type: "paragraph", content: [{ type: "text", text: "Header" }] }] }] },
+          { type: "tableRow", content: [{
+            type: "tableCell",
+            content: [
+              { type: "paragraph", content: [{ type: "text", text: "first paragraph" }] },
+              { type: "paragraph", content: [{ type: "text", text: "second paragraph" }] },
+            ],
+          }] },
+        ],
+      }],
+    };
+    const output = serializeMarkdown(doc, parseMarkdown("").frontMatter);
+    expect(output).toContain("first paragraph<br>second paragraph");
+    const reparsed = parseMarkdown(output);
+    expect(reparsed.mode).toBe("visual");
+    expect(JSON.stringify(reparsed.doc)).toContain("first paragraph");
+    expect(JSON.stringify(reparsed.doc)).toContain("second paragraph");
+    expect(JSON.stringify(reparsed.doc)).toContain("hardBreak");
+  });
+
+  it("preserves bold, italic, code and link marks on the same text", () => {
+    const doc: TiptapNode = {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [{
+          type: "text",
+          text: "combined",
+          marks: [
+            { type: "link", attrs: { href: "https://example.com", title: null } },
+            { type: "italic" },
+            { type: "code" },
+            { type: "bold" },
+          ],
+        }],
+      }],
+    };
+    const output = serializeMarkdown(doc, parseMarkdown("").frontMatter);
+    const reparsed = parseMarkdown(output);
+    const textNode = reparsed.doc.content?.[0]?.content?.[0];
+    expect(textNode?.text).toBe("combined");
+    expect(new Set(textNode?.marks?.map((mark) => mark.type))).toEqual(new Set(["bold", "italic", "code", "link"]));
+  });
+
+  it("blocks remote images until an explicit click", () => {
+    const view = createSafeImageNodeView({ src: "https://tracker.example/pixel.png", markdownSrc: "https://tracker.example/pixel.png", alt: "remote" });
+    expect(view.dom.className).toBe("remote-image-placeholder");
+    expect(view.dom.querySelector("img")).toBeNull();
+    expect(view.dom.querySelector("[src]")).toBeNull();
+    view.dom.click();
+    expect(view.dom.querySelector("img")?.getAttribute("src")).toBe("https://tracker.example/pixel.png");
+    view.destroy();
   });
 });
 

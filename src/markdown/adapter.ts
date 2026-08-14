@@ -15,6 +15,7 @@ function inline(nodes: MdNode[] = [], marks: TiptapMark[] = []): TiptapNode[] {
       const tag = (node.value ?? "").trim().toLowerCase();
       if (tag === "<u>") underline = true;
       if (tag === "</u>") underline = false;
+      if (/^<br\s*\/?\s*>$/.test(tag)) output.push({ type: "hardBreak" });
       continue;
     }
     const converted = NODE_REGISTRY[node.type]?.toTiptap?.(node, tiptapContext(activeMarks, false));
@@ -38,8 +39,14 @@ export function mdastToTiptap(root: Root): TiptapNode {
   return { type: "doc", content: (mdRoot.children ?? []).map((child) => block(child)).filter(Boolean) as TiptapNode[] };
 }
 
+function mdastText(node: MdNode): string {
+  return typeof node.value === "string" ? node.value : (node.children ?? []).map(mdastText).join("");
+}
+
+const MARK_PRIORITY: Record<string, number> = { code: 0, bold: 10, italic: 20, strike: 30, link: 40, underline: 50 };
+
 const MARK_TO_MDAST: Record<string, (current: MdNode, node: TiptapNode, mark: TiptapMark) => MdNode> = {
-  code: (_current, node) => ({ type: "inlineCode", value: node.text ?? "" }),
+  code: (current, node) => ({ type: "inlineCode", value: mdastText(current) || node.text || "" }),
   bold: (current) => ({ type: "strong", children: [current] }),
   italic: (current) => ({ type: "emphasis", children: [current] }),
   strike: (current) => ({ type: "delete", children: [current] }),
@@ -49,7 +56,8 @@ const MARK_TO_MDAST: Record<string, (current: MdNode, node: TiptapNode, mark: Ti
 
 function withMarks(node: TiptapNode): MdNode {
   let current: MdNode = { type: "text", value: node.text ?? "" };
-  for (const mark of [...(node.marks ?? [])].sort((left, right) => left.type.localeCompare(right.type))) {
+  for (const mark of [...(node.marks ?? [])].sort((left, right) =>
+    (MARK_PRIORITY[left.type] ?? 100) - (MARK_PRIORITY[right.type] ?? 100) || left.type.localeCompare(right.type))) {
     current = MARK_TO_MDAST[mark.type]?.(current, node, mark) ?? current;
   }
   return current;

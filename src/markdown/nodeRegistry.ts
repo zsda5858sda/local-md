@@ -46,6 +46,13 @@ export interface NodeSpec {
 const inlineMark = (type: string) => (node: MdNode, context: ToTiptapContext): TiptapNode[] =>
   context.inline(node.children, [...context.marks, { type }]);
 
+function tableCellChildren(cell: TiptapNode, context: ToMdastContext): MdNode[] {
+  return (cell.content ?? []).flatMap((paragraph, index) => [
+    ...(index > 0 ? [{ type: "html", value: "<br>" } satisfies MdNode] : []),
+    ...context.inline(paragraph.content),
+  ]);
+}
+
 export const NODE_REGISTRY: Record<string, NodeSpec> = {
   root: { supported: true, tiptapTypes: ["doc"] },
   text: { supported: true, tiptapTypes: ["text"], toTiptap: (node, context) => context.text(node.value ?? "", context.marks) },
@@ -113,7 +120,7 @@ export const NODE_REGISTRY: Record<string, NodeSpec> = {
     }),
     toMdast: (node, context) => ({
       type: "table", align: (node.attrs?.align as Array<"left" | "right" | "center" | null>) ?? [],
-      children: (node.content ?? []).map((row) => ({ type: "tableRow", children: (row.content ?? []).map((cell) => ({ type: "tableCell", children: context.inline(cell.content?.[0]?.content) })) })),
+      children: (node.content ?? []).map((row) => ({ type: "tableRow", children: (row.content ?? []).map((cell) => ({ type: "tableCell", children: tableCellChildren(cell, context) })) })),
     }),
   },
   tableRow: { supported: true, tiptapTypes: ["tableRow"] },

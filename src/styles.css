@@ -201,7 +201,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .ProseMirror th { background: #efeee8; text-align: left; }
 .ProseMirror hr { margin: 34px 0; border: 0; border-top: 1px solid #d0cec4; }
 .ProseMirror img { max-width: 100%; border-radius: 4px; }
-.remote-image-placeholder { display: inline-flex; max-width: 100%; padding: 9px 12px; background: #eeeae2; border: 1px dashed #b9b3a4; color: var(--muted); border-radius: 5px; font-size: 12px; }
+.safe-image-node { display: inline; }
+.remote-image-placeholder { display: inline-flex; max-width: 100%; padding: 9px 12px; background: #eeeae2; border: 1px dashed #b9b3a4; color: var(--muted); border-radius: 5px; font-size: 12px; cursor: pointer; }
+.remote-image-placeholder:hover, .remote-image-placeholder:focus-visible { background: #e6e1d7; border-color: var(--green); color: var(--ink); }
 .issue-banner { margin: 8px 16px 0; padding: 8px 11px; border: 1px solid #e4d1ad; background: #fbf5e8; color: #7e5a28; border-radius: 5px; font-size: 11px; }
 .issue-banner summary { cursor: pointer; }
 .issue-banner ul { margin: 7px 0 2px; padding-left: 20px; }

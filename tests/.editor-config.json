@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "autoSaveDebounceMs": 1500,
+    "autoSaveEnabled": true,
+    "exportMode": "strict",
+    "lineBreakMode": "soft",
+    "openFolderFileFormatPolicy": "preserve",
+    "softBreakSerialization": "space"
+  },
+  "ui": {
+    "expandedFolders": [
+      "fixtures"
+    ],
+    "lastOpenedFile": "fixtures/code-block.md",
+    "openTabs": [
+      "fixtures/code-block.md"
+    ],
+    "propertiesWidth": 288,
+    "sidebarWidth": 276,
+    "tabAssignments": {},
+    "tabGroups": []
+  },
+  "version": 1,
+  "workspaceName": "tests"
+}

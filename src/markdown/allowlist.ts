@@ -4,7 +4,7 @@ import { containsUnsafeHtml } from "../services/htmlSanitizer";
 import { isSupportedMdastNode, type MdNode } from "./nodeRegistry";
 
 const REFERENCE_NODES = new Set(["definition", "linkReference", "imageReference"]);
-const SAFE_INLINE_HTML = /^<\/?u>$/i;
+const SAFE_INLINE_HTML = /^(?:<\/?u>|<br\s*\/?\s*>)$/i;
 
 function point(value?: { line: number; column: number; offset?: number }): SourcePosition | undefined {
   if (!value) return undefined;

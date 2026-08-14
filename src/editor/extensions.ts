@@ -1,6 +1,81 @@
 import { Extension, mergeAttributes, Node } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
 
+type SafeImageAttributes = Record<string, unknown>;
+
+export function isRemoteImageSource(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function imageSource(attributes: SafeImageAttributes): string {
+  return String(attributes.markdownSrc ?? attributes.src ?? "");
+}
+
+function imageAlt(attributes: SafeImageAttributes): string {
+  return String(attributes.alt ?? "");
+}
+
+export function createSafeImageNodeView(initialAttributes: SafeImageAttributes) {
+  let attributes = initialAttributes;
+  let remoteLoaded = false;
+  const dom = document.createElement("span");
+  dom.setAttribute("contenteditable", "false");
+
+  const render = () => {
+    const source = imageSource(attributes);
+    const src = String(attributes.src ?? source);
+    const alt = imageAlt(attributes);
+    const title = typeof attributes.title === "string" ? attributes.title : "";
+    if (isRemoteImageSource(source) && !remoteLoaded) {
+      dom.className = "remote-image-placeholder";
+      dom.setAttribute("role", "button");
+      dom.setAttribute("tabindex", "0");
+      dom.setAttribute("data-remote-src", source);
+      dom.setAttribute("aria-label", `遠端圖片已阻擋：${alt || source}。點擊或按 Enter 載入`);
+      dom.replaceChildren(document.createTextNode(`遠端圖片已阻擋 · 點擊載入 · ${alt || source}`));
+      return;
+    }
+    dom.className = "safe-image-node";
+    dom.removeAttribute("role");
+    dom.removeAttribute("tabindex");
+    dom.removeAttribute("data-remote-src");
+    dom.removeAttribute("aria-label");
+    const image = document.createElement("img");
+    image.src = src;
+    image.alt = alt;
+    if (title) image.title = title;
+    dom.replaceChildren(image);
+  };
+
+  const loadRemote = () => {
+    if (!isRemoteImageSource(imageSource(attributes)) || remoteLoaded) return;
+    remoteLoaded = true;
+    render();
+  };
+  const onClick = () => loadRemote();
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    loadRemote();
+  };
+  dom.addEventListener("click", onClick);
+  dom.addEventListener("keydown", onKeyDown);
+  render();
+
+  return {
+    dom,
+    update(nextAttributes: SafeImageAttributes) {
+      attributes = nextAttributes;
+      remoteLoaded = false;
+      render();
+    },
+    destroy() {
+      dom.removeEventListener("click", onClick);
+      dom.removeEventListener("keydown", onKeyDown);
+    },
+  };
+}
+
 export const RawMarkdown = Node.create({
   name: "rawMarkdown",
   group: "block",
@@ -43,16 +118,31 @@ export const SafeImage = Image.extend({
       markdownSrc: { default: null, rendered: false },
     };
   },
-  renderHTML({ HTMLAttributes }) {
-    const src = String(HTMLAttributes.src ?? "");
-    if (/^https?:\/\//i.test(src)) {
+  renderHTML({ node, HTMLAttributes }) {
+    const src = imageSource(node.attrs);
+    if (isRemoteImageSource(src)) {
       return ["span", {
         class: "remote-image-placeholder",
         "data-remote-src": src,
-        role: "img",
-        "aria-label": `遠端圖片已阻擋：${HTMLAttributes.alt ?? src}`,
-      }, `遠端圖片已阻擋 · ${HTMLAttributes.alt || src}`];
+        role: "button",
+        tabindex: "0",
+        "aria-label": `遠端圖片已阻擋：${HTMLAttributes.alt ?? src}。點擊或按 Enter 載入`,
+      }, `遠端圖片已阻擋 · 點擊載入 · ${HTMLAttributes.alt || src}`];
     }
     return ["img", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes)];
+  },
+  addNodeView() {
+    return ({ node }) => {
+      const view = createSafeImageNodeView(node.attrs);
+      return {
+        dom: view.dom,
+        update: (nextNode) => {
+          if (nextNode.type !== node.type) return false;
+          view.update(nextNode.attrs);
+          return true;
+        },
+        destroy: view.destroy,
+      };
+    };
   },
 });
