@@ -27,8 +27,8 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": ["icons/icon.ico"],
     "category": "Productivity",
     "shortDescription": "Local-first Markdown editor"
   }
 }
-

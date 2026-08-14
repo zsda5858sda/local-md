@@ -1,6 +1,9 @@
 import type { Root } from "mdast";
 import type { TiptapMark, TiptapNode } from "../domain/types";
-import { NODE_REGISTRY, TIPTAP_NODE_REGISTRY, type MdNode, type ToMdastContext, type ToTiptapContext } from "./nodeRegistry";
+import {
+  isMdNode, isMdRoot, NODE_REGISTRY, TIPTAP_NODE_REGISTRY,
+  type MdNode, type MdRoot, type ToMdastContext, type ToTiptapContext,
+} from "./nodeRegistry";
 
 function text(value: string, marks?: TiptapMark[]): TiptapNode {
   return { type: "text", text: value.replace(/[\t ]*\n[\t ]*/g, " ").replace(/ {2,}/g, " "), ...(marks?.length ? { marks } : {}) };
@@ -35,8 +38,12 @@ function block(node: MdNode, tableHeader = false): TiptapNode | null {
 }
 
 export function mdastToTiptap(root: Root): TiptapNode {
-  const mdRoot = root as unknown as MdNode;
-  return { type: "doc", content: (mdRoot.children ?? []).map((child) => block(child)).filter(Boolean) as TiptapNode[] };
+  if (!isMdRoot(root)) throw new TypeError("Invalid MDAST root");
+  const children = root.children.map((child) => {
+    if (!isMdNode(child)) throw new TypeError("Invalid MDAST child node");
+    return child;
+  });
+  return { type: "doc", content: children.map((child) => block(child)).filter(Boolean) as TiptapNode[] };
 }
 
 function mdastText(node: MdNode): string {
@@ -86,6 +93,6 @@ function mdBlock(node: TiptapNode): MdNode | null {
   return TIPTAP_NODE_REGISTRY[node.type]?.toMdast?.(node, mdastContext()) ?? null;
 }
 
-export function tiptapToMdast(doc: TiptapNode): Root {
-  return { type: "root", children: (doc.content ?? []).map(mdBlock).filter(Boolean) } as unknown as Root;
+export function tiptapToMdast(doc: TiptapNode): MdRoot {
+  return { type: "root", children: (doc.content ?? []).map(mdBlock).filter((node): node is MdNode => node !== null) };
 }

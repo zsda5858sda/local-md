@@ -5,6 +5,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import type { DiskDocument, FileFormatProfile, WorkspaceEntry, WorkspaceSettings } from "../domain/types";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../domain/types";
 import { parseMarkdown, serializeMarkdown } from "../markdown/pipeline";
+import { t } from "../i18n";
 
 const UTF8_LF: FileFormatProfile = { encoding: "utf-8", bom: "none", eol: "lf" };
 
@@ -42,7 +43,7 @@ function demoTree(): WorkspaceEntry[] {
 
 export async function chooseWorkspace(): Promise<string | null> {
   if (!isTauri()) return "demo://workspace";
-  const selected = await open({ directory: true, multiple: false, title: "開啟 Markdown 工作區" });
+  const selected = await open({ directory: true, multiple: false, title: t("desktop.openWorkspace") });
   return typeof selected === "string" ? selected : null;
 }
 
@@ -85,7 +86,7 @@ export function isSaveError(error: unknown): error is SaveError {
 }
 
 export function errorMessage(error: unknown): string {
-  if (isSaveError(error)) return error.kind === "Conflict" ? "磁碟版本已變更" : error.message;
+  if (isSaveError(error)) return error.kind === "Conflict" ? t("desktop.diskChanged") : error.message;
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -104,7 +105,7 @@ export async function saveDocument(request: SaveRequest): Promise<{ hash: string
 
 export async function createEntry(root: string, relativePath: string, kind: "file" | "directory"): Promise<void> {
   if (!isTauri()) {
-    if (kind === "file") demoFiles.set(relativePath, "# 未命名\n");
+    if (kind === "file") demoFiles.set(relativePath, t("desktop.untitledDocument"));
     return;
   }
   await invoke("create_entry", { root, relativePath, kind });
@@ -132,7 +133,7 @@ export async function deleteEntry(root: string, relativePath: string): Promise<v
 }
 
 export async function readWorkspaceSettings(root: string): Promise<{ settings: WorkspaceSettings; readOnly: boolean; warning?: string }> {
-  if (!isTauri()) return { settings: { ...DEFAULT_WORKSPACE_SETTINGS, workspaceName: "示範工作區" }, readOnly: false };
+  if (!isTauri()) return { settings: { ...DEFAULT_WORKSPACE_SETTINGS, workspaceName: t("desktop.demoWorkspace") }, readOnly: false };
   return invoke("read_workspace_settings", { root });
 }
 
@@ -174,7 +175,7 @@ export async function importFolder(targetRoot: string): Promise<ImportReport | n
   if (!isTauri()) {
     return { succeeded: 0, failed: 0, files: [] };
   }
-  const source = await open({ directory: true, multiple: false, title: "選擇要匯入的 Markdown 與資源資料夾" });
+  const source = await open({ directory: true, multiple: false, title: t("desktop.importFolder") });
   if (typeof source !== "string") return null;
   return invoke("import_workspace", { source, target: targetRoot });
 }
@@ -182,7 +183,7 @@ export async function importFolder(targetRoot: string): Promise<ImportReport | n
 export async function exportWorkspace(root: string, workspaceName: string): Promise<boolean> {
   if (!isTauri()) return false;
   const destination = await save({
-    title: "匯出 Workspace ZIP",
+    title: t("desktop.exportZip"),
     defaultPath: `${workspaceName || "workspace"}.zip`,
     filters: [{ name: "ZIP Archive", extensions: ["zip"] }],
   });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Trash2, X } from "lucide-react";
 import type { FrontMatterState } from "../domain/types";
+import { t } from "../i18n";
 
 interface PropertiesPanelProps {
   width: number;
@@ -28,10 +29,10 @@ export function PropertiesPanel({ state, onChange, onClose, width }: PropertiesP
 
   return (
     <aside className="properties-panel" style={{ flexBasis: `${width}px` }}>
-      <header><strong>頁面屬性</strong><button className="icon-button" aria-label="關閉屬性" onClick={onClose}><X /></button></header>
-      {state.format === "unsupported" ? <p className="muted">此文件使用非 YAML front-matter，已保留原文但不解析。</p> : (
+      <header><strong>{t("properties.title")}</strong><button className="icon-button" aria-label={t("properties.close")} onClick={onClose}><X /></button></header>
+      {state.format === "unsupported" ? <p className="muted">{t("properties.unsupported")}</p> : (
         <div className="property-list">
-          {entries.length === 0 && <p className="muted">尚無頁面屬性。</p>}
+          {entries.length === 0 && <p className="muted">{t("properties.empty")}</p>}
           {entries.map(([key, value]) => (
             <div className="property-row" key={key}>
               <label>
@@ -51,12 +52,12 @@ export function PropertiesPanel({ state, onChange, onClose, width }: PropertiesP
                   <input value={String(value ?? "")} onChange={(event) => update(key, event.target.value)} />
                 )}
               </label>
-              <button className="property-delete" aria-label={`刪除屬性 ${key}`} onClick={() => remove(key)}><Trash2 /></button>
+              <button className="property-delete" aria-label={t("properties.delete", { key })} onClick={() => remove(key)}><Trash2 /></button>
             </div>
           ))}
           <div className="property-add">
-            <input aria-label="新屬性名稱" placeholder="新屬性名稱" value={newKey} onChange={(event) => setNewKey(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") add(); }} />
-            <button className="secondary-button" disabled={!newKey.trim() || Object.hasOwn(state.data, newKey.trim())} onClick={add}>新增</button>
+            <input aria-label={t("properties.newName")} placeholder={t("properties.newName")} value={newKey} onChange={(event) => setNewKey(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") add(); }} />
+            <button className="secondary-button" disabled={!newKey.trim() || Object.hasOwn(state.data, newKey.trim())} onClick={add}>{t("common.add")}</button>
           </div>
         </div>
       )}

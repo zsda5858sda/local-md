@@ -12,6 +12,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chardetng::EncodingDetector;
 use encoding_rs::{Encoding, UTF_8};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use once_cell::sync::Lazy;
 use percent_encoding::percent_decode_str;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,21 @@ const SNAPSHOT_RETENTION: usize = 5;
 const SNAPSHOT_MIN_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_MARKDOWN_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+
+static URI_SCHEME: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)^[a-z][a-z\d+.-]*:").expect("URI scheme regex must compile")
+});
+static INLINE_IMAGE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
+        .expect("inline image regex must compile")
+});
+static REFERENCE_IMAGE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"!\[([^\]]*)\]\[([^\]]*)\]").expect("reference image regex must compile")
+});
+static LINK_DEFINITION: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?m)^\s*\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))")
+        .expect("link definition regex must compile")
+});
 
 struct WatchState(Mutex<Option<RecommendedWatcher>>);
 
@@ -627,7 +643,7 @@ fn normalized_asset_path(document_relative_path: &str, asset_reference: &str) ->
 
 #[tauri::command]
 fn read_workspace_asset(root: String, document_relative_path: String, asset_reference: String) -> Result<Option<String>, SaveError> {
-    if asset_reference.starts_with('#') || asset_reference.starts_with('/') || Regex::new(r"(?i)^[a-z][a-z\d+.-]*:").map_err(|error| error.to_string())?.is_match(&asset_reference) {
+    if asset_reference.starts_with('#') || asset_reference.starts_with('/') || URI_SCHEME.is_match(&asset_reference) {
         return Ok(None);
     }
     let relative = normalized_asset_path(&document_relative_path, &asset_reference)?;
@@ -742,27 +758,24 @@ fn scan_orphan_assets(root: String) -> Result<Vec<String>, SaveError> {
     let root = canonical_root(&root)?;
     let assets = root.join("_assets");
     if !assets.exists() { return Ok(Vec::new()); }
-    let image_link = Regex::new(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))").map_err(|error| error.to_string())?;
-    let image_reference = Regex::new(r"!\[([^\]]*)\]\[([^\]]*)\]").map_err(|error| error.to_string())?;
-    let definition = Regex::new(r"(?m)^\s*\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))").map_err(|error| error.to_string())?;
     let mut referenced = HashSet::new();
     for entry in WalkDir::new(&root).follow_links(false).into_iter().filter_map(Result::ok).filter(|entry| entry.file_type().is_file() && is_markdown(entry.path())) {
         let bytes = match fs::read(entry.path()) { Ok(bytes) => bytes, Err(_) => continue };
         let source = match detect_and_decode(&bytes) { Ok((source, _)) => source, Err(_) => continue };
         let parent = entry.path().parent().unwrap_or(&root);
-        for captures in image_link.captures_iter(&source) {
+        for captures in INLINE_IMAGE.captures_iter(&source) {
             let target = captures.get(1).or_else(|| captures.get(2)).map(|value| value.as_str()).unwrap_or("");
             if target.starts_with("http://") || target.starts_with("https://") || target.starts_with("data:") { continue; }
             if let Ok(decoded) = percent_decode_str(target).decode_utf8() {
                 if let Ok(path) = fs::canonicalize(parent.join(decoded.as_ref())) { referenced.insert(path); }
             }
         }
-        let definitions: std::collections::HashMap<String, String> = definition.captures_iter(&source).filter_map(|captures| {
+        let definitions: std::collections::HashMap<String, String> = LINK_DEFINITION.captures_iter(&source).filter_map(|captures| {
             let key = captures.get(1)?.as_str().to_ascii_lowercase();
             let value = captures.get(2).or_else(|| captures.get(3))?.as_str().to_string();
             Some((key, value))
         }).collect();
-        for captures in image_reference.captures_iter(&source) {
+        for captures in REFERENCE_IMAGE.captures_iter(&source) {
             let label = captures.get(1).map(|value| value.as_str()).unwrap_or("");
             let reference = captures.get(2).map(|value| value.as_str()).unwrap_or("");
             let key = if reference.is_empty() { label } else { reference }.to_ascii_lowercase();

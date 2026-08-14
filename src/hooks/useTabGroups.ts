@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { OpenDocument, WorkspaceSettings } from "../domain/types";
+import { t } from "../i18n";
 
 export const TAB_GROUP_COLORS = ["#6b7280", "#5b8def", "#ef7d72", "#eabf3b", "#70bf8b", "#e879b0", "#b46de0", "#56c4d8", "#f0a15f"];
 export type TabDropTarget = { type: "tab"; id: string; position: "before" | "after" } | { type: "group"; groupId: string | null } | null;
@@ -30,10 +31,10 @@ export function useTabGroups(
   const addTabGroup = () => setSettings((current) => {
     const used = new Set(current.ui.tabGroups.map((group) => group.name));
     let number = 1;
-    while (used.has(`群組 ${number}`)) number += 1;
+    while (used.has(t("tabs.numberedGroup", { number }))) number += 1;
     return {
       ...current,
-      ui: { ...current.ui, tabGroups: [...current.ui.tabGroups, { id: crypto.randomUUID(), name: `群組 ${number}`, color: TAB_GROUP_COLORS[1], collapsed: false }] },
+      ui: { ...current.ui, tabGroups: [...current.ui.tabGroups, { id: crypto.randomUUID(), name: t("tabs.numberedGroup", { number }), color: TAB_GROUP_COLORS[1], collapsed: false }] },
     };
   });
 
@@ -49,7 +50,7 @@ export function useTabGroups(
   const commitTabGroupName = () => {
     if (!groupMenu) return;
     const name = groupMenu.draftName.trim();
-    const currentName = settings.ui.tabGroups.find((group) => group.id === groupMenu.id)?.name ?? "群組";
+    const currentName = settings.ui.tabGroups.find((group) => group.id === groupMenu.id)?.name ?? t("tabs.defaultGroup");
     if (!name) { setGroupMenu({ ...groupMenu, draftName: currentName }); return; }
     setSettings((current) => ({ ...current, ui: { ...current.ui, tabGroups: current.ui.tabGroups.map((group) => group.id === groupMenu.id ? { ...group, name } : group) } }));
     setGroupMenu((current) => current ? { ...current, draftName: name } : current);

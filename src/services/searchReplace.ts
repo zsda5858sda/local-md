@@ -1,5 +1,7 @@
+import { t } from "../i18n";
+
 export function searchPattern(query: string, useRegex: boolean, global = true): RegExp {
-  if (!query) throw new Error("搜尋文字不可為空白");
+  if (!query) throw new Error(t("validation.searchRequired"));
   const source = useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(source, `${global ? "g" : ""}${useRegex ? "mu" : "iu"}`);
 }

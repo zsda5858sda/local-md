@@ -1,5 +1,6 @@
 import { parseDocument } from "yaml";
 import type { FrontMatterState, MarkdownIssue } from "../domain/types";
+import { t } from "../i18n";
 
 const YAML_FRONT_MATTER = /^(---\n)([\s\S]*?)(\n---(?:\n|$))/;
 const OTHER_FRONT_MATTER = /^(\+\+\+\n)([\s\S]*?)(\n\+\+\+(?:\n|$))/;
@@ -15,7 +16,7 @@ export function extractFrontMatter(source: string): {
     const issues: MarkdownIssue[] = document.errors.map((error) => ({
       severity: "error",
       kind: "frontmatter",
-      message: `YAML front-matter 無法解析：${error.message}`,
+      message: t("markdown.frontMatterParseFailed", { message: error.message }),
       recoverable: true,
     }));
     const parsed = document.toJS() as unknown;
@@ -47,7 +48,7 @@ export function extractFrontMatter(source: string): {
       issues: [{
         severity: "warning",
         kind: "frontmatter",
-        message: "偵測到非 YAML front-matter，已以原始 Markdown 區塊保留。",
+        message: t("markdown.frontMatterPreserved"),
         recoverable: true,
       }],
     };

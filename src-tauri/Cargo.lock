@@ -1854,6 +1854,7 @@ dependencies = [
  "encoding_rs",
  "hex",
  "notify",
+ "once_cell",
  "percent-encoding",
  "regex",
  "serde",

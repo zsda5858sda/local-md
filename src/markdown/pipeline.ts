@@ -8,7 +8,8 @@ import type { FrontMatterState, ParsedMarkdown, TiptapNode } from "../domain/typ
 import { extractFrontMatter, serializeFrontMatter } from "./frontmatter";
 import { validateAndPreserve } from "./allowlist";
 import { mdastToTiptap, tiptapToMdast } from "./adapter";
-import { isRegisteredTiptapNode } from "./nodeRegistry";
+import { isMdastRoot, type MdRoot } from "./nodeRegistry";
+import { t } from "../i18n";
 
 const parser = unified().use(remarkParse).use(remarkGfm, { singleTilde: false });
 const stringifier = unified()
@@ -36,7 +37,7 @@ function addUnsupportedFrontMatter(doc: TiptapNode, frontMatter: FrontMatterStat
     ...doc,
     content: [{
       type: "rawMarkdown",
-      attrs: { reason: "非 YAML front-matter" },
+      attrs: { reason: t("markdown.unsupportedFrontMatter") },
       content: [{ type: "text", text: frontMatter.raw }],
     }, ...(doc.content ?? [])],
   };
@@ -45,7 +46,8 @@ function addUnsupportedFrontMatter(doc: TiptapNode, frontMatter: FrontMatterStat
 export function parseMarkdown(input: string): ParsedMarkdown {
   const source = normalizeEol(input).replace(/^\uFEFF/, "");
   const extracted = extractFrontMatter(source);
-  const tree = parser.parse(extracted.frontMatter.body) as Root;
+  const tree = parser.parse(extracted.frontMatter.body);
+  if (!isMdastRoot(tree)) throw new TypeError("Markdown parser returned an invalid MDAST root");
   const validation = validateAndPreserve(tree, extracted.frontMatter.body);
   const doc = addUnsupportedFrontMatter(mdastToTiptap(validation.root), extracted.frontMatter);
   return {
@@ -57,21 +59,22 @@ export function parseMarkdown(input: string): ParsedMarkdown {
   };
 }
 
-function pullRawNodes(root: Root): { root: Root; replacements: Map<string, string> } {
+function pullRawNodes(root: MdRoot): { root: Root; replacements: Map<string, string> } {
   const replacements = new Map<string, string>();
-  const mdRoot = root as unknown as { children: Array<Record<string, unknown>> };
-  mdRoot.children = mdRoot.children.map((node, index) => {
-    if (!isRegisteredTiptapNode(String(node.type)) || node.type !== "rawMarkdown") return node;
+  const children = root.children.map((node, index) => {
+    if (node.type !== "rawMarkdown") return node;
     const marker = `<!--LOCAL_MD_RAW_${index}-->`;
     replacements.set(marker, String(node.value ?? ""));
     return { type: "html", value: marker };
   });
-  return { root: mdRoot as unknown as Root, replacements };
+  const converted: unknown = { type: "root", children };
+  if (!isMdastRoot(converted)) throw new TypeError("Markdown adapter returned an invalid MDAST root");
+  return { root: converted, replacements };
 }
 
 export function serializeMarkdown(doc: TiptapNode, frontMatter: FrontMatterState): string {
   const hasRawFrontMatterNode = doc.content?.[0]?.type === "rawMarkdown"
-    && doc.content[0].attrs?.reason === "非 YAML front-matter";
+    && doc.content[0].attrs?.reason === t("markdown.unsupportedFrontMatter");
   const bodyDoc = hasRawFrontMatterNode ? { ...doc, content: doc.content?.slice(1) } : doc;
   const ast = tiptapToMdast(bodyDoc);
   const { root, replacements } = pullRawNodes(ast);

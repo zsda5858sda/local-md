@@ -4,6 +4,7 @@ import {
   FolderPlus, MoreHorizontal, PanelLeftClose, RefreshCw, Search,
 } from "lucide-react";
 import type { SearchHit, WorkspaceEntry } from "../domain/types";
+import { t } from "../i18n";
 
 export interface SearchProps {
   query: string;
@@ -61,11 +62,11 @@ function TreeItem({ entry, depth, props }: { entry: WorkspaceEntry; depth: numbe
           </span>
           <span className="tree-label">{entry.name}</span>
         </button>
-        <button className="tree-more" aria-label={`${entry.name} 選單`} aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}><MoreHorizontal /></button>
+        <button className="tree-more" aria-label={t("sidebar.entryMenu", { name: entry.name })} aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}><MoreHorizontal /></button>
         {menuOpen && (
           <div className="tree-context-menu" role="menu">
-            <button role="menuitem" onClick={() => { setMenuOpen(false); props.onRename(entry); }}>重新命名</button>
-            <button role="menuitem" className="danger" onClick={() => { setMenuOpen(false); props.onDelete(entry); }}>移至資源回收桶</button>
+            <button role="menuitem" onClick={() => { setMenuOpen(false); props.onRename(entry); }}>{t("common.rename")}</button>
+            <button role="menuitem" className="danger" onClick={() => { setMenuOpen(false); props.onDelete(entry); }}>{t("sidebar.trash")}</button>
           </div>
         )}
       </div>
@@ -100,41 +101,41 @@ export function Sidebar(props: SidebarProps) {
       <header className="sidebar-header">
         <div className="workspace-mark">L</div>
         <strong title={props.workspaceName}>{props.workspaceName}</strong>
-        <button className="icon-button" aria-label="收合側邊欄" onClick={props.onCollapse}><PanelLeftClose /></button>
+        <button className="icon-button" aria-label={t("sidebar.collapse")} onClick={props.onCollapse}><PanelLeftClose /></button>
       </header>
       <div className="sidebar-actions">
-        <button aria-expanded={searchOpen} onClick={() => setSearchOpen((value) => !value)}><Search />搜尋</button>
-        <button onClick={props.onRefresh}><RefreshCw />重新整理</button>
+        <button aria-expanded={searchOpen} onClick={() => setSearchOpen((value) => !value)}><Search />{t("sidebar.search")}</button>
+        <button onClick={props.onRefresh}><RefreshCw />{t("sidebar.refresh")}</button>
       </div>
       {searchOpen && (
         <div className="search-panel">
-          <label className="search-field"><Search /><input ref={searchInputRef} autoFocus value={props.search.query} onChange={(event) => props.search.onQueryChange(event.target.value)} placeholder="搜尋 Markdown 原文…" /></label>
-          <label className="search-field"><span>取代</span><input ref={replacementInputRef} value={props.search.replacementText} onChange={(event) => props.search.onReplacementChange(event.target.value)} placeholder="取代為…" /></label>
+          <label className="search-field"><Search /><input ref={searchInputRef} autoFocus value={props.search.query} onChange={(event) => props.search.onQueryChange(event.target.value)} placeholder={t("sidebar.searchPlaceholder")} /></label>
+          <label className="search-field"><span>{t("sidebar.replace")}</span><input ref={replacementInputRef} value={props.search.replacementText} onChange={(event) => props.search.onReplacementChange(event.target.value)} placeholder={t("sidebar.replacePlaceholder")} /></label>
           <div className="search-options">
-            <select aria-label="搜尋範圍" value={props.search.scope} onChange={(event) => props.search.onScopeChange(event.target.value as "document" | "workspace")}>
-              <option value="document">目前文件</option>
-              <option value="workspace">整個工作區</option>
+            <select aria-label={t("sidebar.searchScope")} value={props.search.scope} onChange={(event) => props.search.onScopeChange(event.target.value as "document" | "workspace")}>
+              <option value="document">{t("sidebar.currentDocument")}</option>
+              <option value="workspace">{t("sidebar.workspace")}</option>
             </select>
             <label><input type="checkbox" checked={props.search.regex} onChange={(event) => props.search.onRegexChange(event.target.checked)} />Regex</label>
           </div>
           {props.search.error && <div className="search-error" role="alert">{props.search.error}</div>}
-          <div className="search-summary"><span>{props.search.query ? `${props.search.hits.length} 筆結果${props.search.hits.length >= 50 ? "（最多顯示 50）" : ""}` : "輸入文字開始搜尋"}</span><button disabled={!props.search.query.trim() || Boolean(props.search.error)} onClick={props.search.onReplaceAll}>全部取代</button></div>
+          <div className="search-summary"><span>{props.search.query ? t("sidebar.resultCount", { count: props.search.hits.length, limit: props.search.hits.length >= 50 ? t("sidebar.resultLimit") : "" }) : t("sidebar.searchHint")}</span><button disabled={!props.search.query.trim() || Boolean(props.search.error)} onClick={props.search.onReplaceAll}>{t("sidebar.replaceAll")}</button></div>
           <ul>
             {props.search.hits.map((hit) => (
-              <li key={hit.id}><button onClick={() => props.search.onOpenHit(hit)}><strong>{hit.relativePath}</strong><span>{hit.lineNumber} · {hit.rawLineText || "空白行"}</span></button></li>
+              <li key={hit.id}><button onClick={() => props.search.onOpenHit(hit)}><strong>{hit.relativePath}</strong><span>{hit.lineNumber} · {hit.rawLineText || t("sidebar.emptyLine")}</span></button></li>
             ))}
           </ul>
         </div>
       )}
       <div className="tree-heading">
-        <button className="tree-root" title="將新增位置切換為根目錄" onClick={() => props.onSelectFolder("")}>{props.selectedFolder ? `檔案 · ${props.selectedFolder}` : "檔案 · 根目錄"}</button>
+        <button className="tree-root" title={t("sidebar.rootTitle")} onClick={() => props.onSelectFolder("")}>{props.selectedFolder ? t("sidebar.folderPath", { path: props.selectedFolder }) : t("sidebar.rootPath")}</button>
         <div>
-          <button aria-label="新增 Markdown" title="新增 Markdown" onClick={() => props.onCreate("file")}><FilePlus2 /></button>
-          <button aria-label="新增資料夾" title="新增資料夾" onClick={() => props.onCreate("directory")}><FolderPlus /></button>
+          <button aria-label={t("sidebar.newMarkdown")} title={t("sidebar.newMarkdown")} onClick={() => props.onCreate("file")}><FilePlus2 /></button>
+          <button aria-label={t("sidebar.newFolder")} title={t("sidebar.newFolder")} onClick={() => props.onCreate("directory")}><FolderPlus /></button>
         </div>
       </div>
-      <nav className="tree" aria-label="工作區檔案"><ul>{props.entries.map((entry) => <TreeItem key={entry.relativePath} entry={entry} depth={0} props={props} />)}</ul></nav>
-      <footer className="sidebar-footer"><span className="status-dot" />本機優先 · 離線</footer>
+      <nav className="tree" aria-label={t("sidebar.workspaceFiles")}><ul>{props.entries.map((entry) => <TreeItem key={entry.relativePath} entry={entry} depth={0} props={props} />)}</ul></nav>
+      <footer className="sidebar-footer"><span className="status-dot" />{t("sidebar.offline")}</footer>
     </aside>
   );
 }

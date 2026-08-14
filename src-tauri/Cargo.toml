@@ -27,6 +27,7 @@ encoding_rs = "0.8"
 chardetng = "0.1"
 trash = "5"
 regex = "1"
+once_cell = "1"
 base64 = "0.22"
 percent-encoding = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }

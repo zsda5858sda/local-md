@@ -1,4 +1,6 @@
 import type { TiptapMark, TiptapNode } from "../domain/types";
+import type { Root } from "mdast";
+import { t } from "../i18n";
 
 export type MdNode = {
   type: string;
@@ -21,6 +23,25 @@ export type MdNode = {
   };
   [key: string]: unknown;
 };
+
+export type MdRoot = { type: "root"; children: MdNode[] };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+export function isMdNode(value: unknown): value is MdNode {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+  return value.children === undefined || (Array.isArray(value.children) && value.children.every(isMdNode));
+}
+
+export function isMdRoot(value: unknown): value is MdRoot {
+  return isMdNode(value) && value.type === "root" && Array.isArray(value.children);
+}
+
+export function isMdastRoot(value: unknown): value is Root {
+  return isMdRoot(value);
+}
 
 export interface ToTiptapContext {
   marks: TiptapMark[];
@@ -131,15 +152,15 @@ export const NODE_REGISTRY: Record<string, NodeSpec> = {
   html: { supported: true },
   rawMarkdown: {
     supported: true, tiptapTypes: ["rawMarkdown"],
-    toTiptap: (node) => ({ type: "rawMarkdown", attrs: { reason: String(node.reason ?? "不支援語法") }, content: node.value ? [{ type: "text", text: node.value }] : [] }),
-    toMdast: (node) => ({ type: "rawMarkdown", value: node.content?.map((item) => item.text ?? "").join("") ?? "", reason: String(node.attrs?.reason ?? "不支援語法") }),
+    toTiptap: (node) => ({ type: "rawMarkdown", attrs: { reason: String(node.reason ?? t("markdown.unsupported")) }, content: node.value ? [{ type: "text", text: node.value }] : [] }),
+    toMdast: (node) => ({ type: "rawMarkdown", value: node.content?.map((item) => item.text ?? "").join("") ?? "", reason: String(node.attrs?.reason ?? t("markdown.unsupported")) }),
   },
-  definition: { supported: false, reason: "跨區塊參照尚未支援" },
-  linkReference: { supported: false, reason: "跨區塊參照尚未支援" },
-  imageReference: { supported: false, reason: "跨區塊參照尚未支援" },
-  footnote: { supported: false, reason: "尚未支援" },
-  footnoteDefinition: { supported: false, reason: "尚未支援" },
-  footnoteReference: { supported: false, reason: "尚未支援" },
+  definition: { supported: false, reason: t("markdown.crossBlockUnsupported") },
+  linkReference: { supported: false, reason: t("markdown.crossBlockUnsupported") },
+  imageReference: { supported: false, reason: t("markdown.crossBlockUnsupported") },
+  footnote: { supported: false, reason: t("markdown.notYetSupported") },
+  footnoteDefinition: { supported: false, reason: t("markdown.notYetSupported") },
+  footnoteReference: { supported: false, reason: t("markdown.notYetSupported") },
 };
 
 export const TIPTAP_NODE_REGISTRY = Object.fromEntries(

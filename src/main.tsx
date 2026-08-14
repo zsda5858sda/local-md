@@ -1,6 +1,7 @@
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { t } from "./i18n";
 import "./styles.css";
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
@@ -12,7 +13,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error: strin
     console.error("Local MD UI error", error, info.componentStack);
   }
   render() {
-    if (this.state.error) return <main className="crash-screen"><AlertTriangleIcon /><h1>Local MD 無法顯示目前畫面</h1><p>{this.state.error}</p><button onClick={() => window.location.reload()}>重新載入應用程式</button></main>;
+    if (this.state.error) return <main className="crash-screen"><AlertTriangleIcon /><h1>{t("crash.title")}</h1><p>{this.state.error}</p><button onClick={() => window.location.reload()}>{t("crash.reload")}</button></main>;
     return this.props.children;
   }
 }

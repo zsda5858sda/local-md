@@ -5,6 +5,7 @@ import { parseMarkdown, serializeMarkdown } from "../markdown/pipeline";
 import { applySaveSuccess, classifySaveConflict } from "../services/saveState";
 import { errorMessage, isSaveError, readDocument, saveDocument } from "../services/desktop";
 import type { WorkspaceSearchIndex } from "../services/searchIndex";
+import { t } from "../i18n";
 
 export function leafName(path: string): string {
   return path.replace(/\\/g, "/").split("/").at(-1) ?? path;
@@ -98,7 +99,7 @@ export function useDocuments() {
     const current = documentsRef.current;
     const index = current.findIndex((item) => item.id === id);
     const document = current[index];
-    if ((document?.dirty || document?.saving) && !window.confirm(`${document.title} 尚未完成儲存。仍要關閉分頁並捨棄未儲存內容嗎？`)) return;
+    if ((document?.dirty || document?.saving) && !window.confirm(t("documents.closeUnsaved", { title: document.title }))) return;
     const timer = saveTimers.current.get(id);
     if (timer) window.clearTimeout(timer);
     saveTimers.current.delete(id);
@@ -113,7 +114,7 @@ export function useDocuments() {
     const current = documentsRef.current;
     const affected = current.filter((document) => targets.has(document.id));
     const unsavedCount = affected.filter((document) => document.dirty || document.saving).length;
-    if (unsavedCount > 0 && !window.confirm(`有 ${unsavedCount} 個檔案尚未完成儲存，仍要關閉嗎？`)) return false;
+    if (unsavedCount > 0 && !window.confirm(t("documents.closeManyUnsaved", { count: unsavedCount }))) return false;
     affected.forEach((document) => {
       const timer = saveTimers.current.get(document.id);
       if (timer) window.clearTimeout(timer);
@@ -151,7 +152,20 @@ interface PersistenceOptions {
 
 export function useDocumentPersistence(options: PersistenceOptions) {
   const optionsRef = useRef(options);
+  const persistRef = useRef<(id: string, force?: boolean) => Promise<void>>(async () => undefined);
   useEffect(() => { optionsRef.current = options; }, [options]);
+
+  const scheduleSave = useCallback((id: string) => {
+    const currentOptions = optionsRef.current;
+    if (!currentOptions.autoSaveEnabled) return;
+    const previous = currentOptions.saveTimers.current.get(id);
+    if (previous) window.clearTimeout(previous);
+    const timer = window.setTimeout(() => {
+      currentOptions.saveTimers.current.delete(id);
+      void persistRef.current(id);
+    }, currentOptions.autoSaveDebounceMs);
+    currentOptions.saveTimers.current.set(id, timer);
+  }, []);
 
   const persist = useCallback(async (id: string, force = false) => {
     const currentOptions = optionsRef.current;
@@ -172,7 +186,7 @@ export function useDocumentPersistence(options: PersistenceOptions) {
       currentOptions.dispatch({ type: "SAVE_SUCCESS", id, result: { revision, content, ...result } });
       currentOptions.searchIndex.current.update(document.path, document.relativePath, content);
       currentOptions.refreshSearchResults();
-      currentOptions.setToast("已安全儲存");
+      currentOptions.setToast(t("documents.saved"));
     } catch (error) {
       if (isSaveError(error) && error.kind === "Conflict") {
         try {
@@ -191,22 +205,15 @@ export function useDocumentPersistence(options: PersistenceOptions) {
       }
     } finally {
       currentOptions.savingIds.current.delete(id);
-      if (succeeded) window.setTimeout(() => {
+      if (succeeded) {
         const latestOptions = optionsRef.current;
         const latest = latestOptions.documentsRef.current.find((item) => item.id === id);
-        if (latestOptions.autoSaveEnabled && latest?.dirty && !latest.conflict) void persist(id);
-      }, 0);
+        if (latest?.dirty && !latest.conflict) scheduleSave(id);
+      }
     }
-  }, []);
+  }, [scheduleSave]);
 
-  const scheduleSave = useCallback((id: string) => {
-    const currentOptions = optionsRef.current;
-    if (!currentOptions.autoSaveEnabled) return;
-    const previous = currentOptions.saveTimers.current.get(id);
-    if (previous) window.clearTimeout(previous);
-    const timer = window.setTimeout(() => { currentOptions.saveTimers.current.delete(id); void persist(id); }, currentOptions.autoSaveDebounceMs);
-    currentOptions.saveTimers.current.set(id, timer);
-  }, [persist]);
+  persistRef.current = persist;
 
   useEffect(() => {
     if (!options.autoSaveEnabled) {

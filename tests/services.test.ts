@@ -111,6 +111,8 @@ describe("keyboard shortcuts", () => {
   it("maps search and replace shortcuts to the app", () => {
     expect(shortcut("f", { ctrlKey: true })).toBe("search");
     expect(shortcut("h", { metaKey: true })).toBe("replace");
+    expect(shortcut("s", { ctrlKey: true })).toBe("save");
+    expect(shortcut("w", { metaKey: true })).toBe("close-tab");
   });
 
   it("keeps editor formatting shortcuts", () => {
@@ -126,6 +128,7 @@ describe("keyboard shortcuts", () => {
     expect(shortcut("b", { ctrlKey: true, shiftKey: true })).toBe("block-browser");
     expect(shortcut("F12")).toBe("block-browser");
     expect(shortcut("ArrowLeft", { altKey: true })).toBe("block-browser");
+    expect(shortcut("F12", { ctrlKey: true, shiftKey: true })).toBe("block-browser");
   });
 });
 

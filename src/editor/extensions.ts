@@ -1,5 +1,6 @@
 import { Extension, mergeAttributes, Node } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
+import { t } from "../i18n";
 
 type SafeImageAttributes = Record<string, unknown>;
 
@@ -31,8 +32,8 @@ export function createSafeImageNodeView(initialAttributes: SafeImageAttributes) 
       dom.setAttribute("role", "button");
       dom.setAttribute("tabindex", "0");
       dom.setAttribute("data-remote-src", source);
-      dom.setAttribute("aria-label", `遠端圖片已阻擋：${alt || source}。點擊或按 Enter 載入`);
-      dom.replaceChildren(document.createTextNode(`遠端圖片已阻擋 · 點擊載入 · ${alt || source}`));
+      dom.setAttribute("aria-label", t("image.remoteBlockedAria", { source: alt || source }));
+      dom.replaceChildren(document.createTextNode(t("image.remoteBlocked", { source: alt || source })));
       return;
     }
     dom.className = "safe-image-node";
@@ -85,7 +86,7 @@ export const RawMarkdown = Node.create({
   defining: true,
   isolating: true,
   addAttributes() {
-    return { reason: { default: "不支援語法" } };
+    return { reason: { default: t("markdown.unsupported") } };
   },
   parseHTML() {
     return [{ tag: "pre[data-raw-markdown]", preserveWhitespace: "full" }];
@@ -126,8 +127,8 @@ export const SafeImage = Image.extend({
         "data-remote-src": src,
         role: "button",
         tabindex: "0",
-        "aria-label": `遠端圖片已阻擋：${HTMLAttributes.alt ?? src}。點擊或按 Enter 載入`,
-      }, `遠端圖片已阻擋 · 點擊載入 · ${HTMLAttributes.alt || src}`];
+        "aria-label": t("image.remoteBlockedAria", { source: String(HTMLAttributes.alt ?? src) }),
+      }, t("image.remoteBlocked", { source: String(HTMLAttributes.alt || src) })];
     }
     return ["img", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes)];
   },

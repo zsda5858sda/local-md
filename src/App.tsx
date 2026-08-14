@@ -25,6 +25,7 @@ import { useSaveConflict } from "./hooks/useSaveConflict";
 import { useWorkspace, useWorkspaceWatcher } from "./hooks/useWorkspace";
 import { useWorkspaceSearch } from "./hooks/useWorkspaceSearch";
 import { TAB_GROUP_COLORS, useTabGroups, type TabDropTarget } from "./hooks/useTabGroups";
+import { t } from "./i18n";
 
 function flattenFiles(entries: WorkspaceEntry[]): WorkspaceEntry[] {
   return entries.flatMap((entry) => entry.kind === "file" ? [entry] : flattenFiles(entry.children ?? []));
@@ -145,7 +146,7 @@ export default function App() {
   useEffect(() => { refreshSearchResults(searchQuery, searchRegex, searchScope); }, [activeId, refreshSearchResults, searchQuery, searchRegex, searchScope]);
 
   const openWorkspace = useCallback(async () => {
-    if (documentsRef.current.some((doc) => doc.dirty || doc.saving) && !window.confirm("目前有尚未完成儲存的文件。仍要切換工作區嗎？")) return;
+    if (documentsRef.current.some((doc) => doc.dirty || doc.saving) && !window.confirm(t("app.switchWorkspaceConfirm"))) return;
     setLoading(true);
     setFatalError(null);
     setSessionReady(false);
@@ -187,14 +188,14 @@ export default function App() {
     } finally { setLoading(false); }
   }, [indexWorkspace, selectDocument, updateDocuments]);
 
-  const openFile = useCallback(async (entry: WorkspaceEntry, keepSearchTarget = false) => {
-    if (!workspaceRoot || entry.kind !== "file") return;
+  const openFile = useMemo(() => withWorkspace(async (root, entry: WorkspaceEntry, keepSearchTarget = false) => {
+    if (entry.kind !== "file") return;
     const existing = documentsRef.current.find((doc) => doc.relativePath === entry.relativePath);
     if (existing) selectDocument(existing.id);
     else {
       setLoading(true);
       try {
-        const disk = await readDocument(workspaceRoot, entry.relativePath);
+        const disk = await readDocument(root, entry.relativePath);
         const next = openDocument(disk);
         updateDocuments((current) => [...current, next]);
         selectDocument(next.id);
@@ -207,7 +208,7 @@ export default function App() {
     setSelectedFolder(parentPath(entry.relativePath));
     if (!keepSearchTarget) setSearchTarget(null);
     if (window.innerWidth <= 850) setSidebarOpen(false);
-  }, [selectDocument, settings.ui.tabAssignments, updateDocuments, workspaceRoot]);
+  }), [selectDocument, settings.ui.tabAssignments, updateDocuments, withWorkspace]);
 
   const markChanged = (id: string, update: (item: OpenDocument) => OpenDocument) => {
     const current = documentsRef.current.find((item) => item.id === id);
@@ -236,7 +237,7 @@ export default function App() {
       const disk = await readDocument(root, doc.relativePath);
       saveConflict.reloadFromDisk(id, disk);
       searchIndex.current.update(disk.path, disk.relativePath, disk.content);
-      setToast("已重新載入磁碟版本");
+      setToast(t("app.diskReloaded"));
     } catch (error) { setFatalError(errorMessage(error)); }
   });
 
@@ -264,7 +265,7 @@ export default function App() {
           setSelectedFolder(relativePath);
           setSettings((current) => ({ ...current, ui: { ...current.ui, expandedFolders: [...new Set([...current.ui.expandedFolders, relativePath])] } }));
         }
-        setToast("已建立");
+        setToast(t("app.created"));
       } catch (error) { setFatalError(errorMessage(error)); }
       return;
     }
@@ -272,7 +273,7 @@ export default function App() {
     const entry = entryDialog.entry;
     if (!entry || raw === entry.name) return;
     if (documentsRef.current.some((doc) => doc.dirty || doc.saving || doc.conflict)) {
-      setFatalError("重新命名前請先完成所有開啟文件的儲存或衝突處理。");
+      setFatalError(t("app.renameBlocked"));
       return;
     }
     const targetName = entry.kind === "file" && !/\.(?:md|markdown)$/i.test(raw) ? `${raw}.md` : raw;
@@ -314,17 +315,17 @@ export default function App() {
         },
       }));
       void indexWorkspace(root, entries);
-      setToast("已重新命名並更新相對連結");
+      setToast(t("app.renamed"));
     } catch (error) { setFatalError(errorMessage(error)); }
   });
 
   const handleDelete = withWorkspace(async (root, entry: WorkspaceEntry) => {
     const affected = documentsRef.current.filter((doc) => isWithin(doc.relativePath, entry.relativePath));
     const details = entry.kind === "directory"
-      ? "此資料夾可能包含檔案樹未顯示的圖片與其他檔案；整個資料夾都會移至資源回收桶。"
-      : "文件會移至資源回收桶。";
-    const unsaved = affected.some((doc) => doc.dirty || doc.saving) ? " 尚有未儲存內容，將一併捨棄。" : "";
-    if (!window.confirm(`確定刪除「${entry.relativePath}」？${details}${unsaved}`)) return;
+      ? t("app.deleteFolderDetails")
+      : t("app.deleteFileDetails");
+    const unsaved = affected.some((doc) => doc.dirty || doc.saving) ? t("app.deleteUnsaved") : "";
+    if (!window.confirm(t("app.deleteConfirm", { path: entry.relativePath, details, unsaved }))) return;
     try {
       await deleteEntry(root, entry.relativePath);
       affected.forEach((doc) => {
@@ -338,7 +339,7 @@ export default function App() {
       setSettings((current) => ({ ...current, ui: { ...current.ui, tabAssignments: Object.fromEntries(Object.entries(current.ui.tabAssignments).filter(([path]) => !isWithin(path, entry.relativePath))) } }));
       if (!remaining.some((doc) => doc.id === activeIdRef.current)) selectDocument(remaining.at(-1)?.id ?? null);
       await refreshTree();
-      setToast("已移至資源回收桶");
+      setToast(t("app.trashed"));
     } catch (error) { setFatalError(errorMessage(error)); }
   });
 
@@ -349,20 +350,20 @@ export default function App() {
 
     if (searchScope === "document") {
       const doc = documentsRef.current.find((item) => item.id === activeIdRef.current);
-      if (!doc) { setSearchError("目前沒有開啟的文件"); return; }
+      if (!doc) { setSearchError(t("app.noOpenDocument")); return; }
       const source = documentSaveContent(doc);
       const result = replaceMatches(source, searchQuery, replacementText, searchRegex);
-      if (!result.count) { setToast("目前文件沒有可取代的結果"); return; }
+      if (!result.count) { setToast(t("app.noDocumentReplacements")); return; }
       updateDocuments((current) => current.map((item) => item.id === doc.id ? { ...item, parsed: parseMarkdown(result.content), dirty: true, revision: item.revision + 1, editorVersion: item.editorVersion + 1 } : item));
       searchIndex.current.update(doc.path, doc.relativePath, result.content);
       scheduleSave(doc.id);
       refreshSearchResults();
-      setToast(`已在目前文件取代 ${result.count} 處`);
+      setToast(t("app.documentReplaced", { count: result.count }));
       return;
     }
 
     if (documentsRef.current.some((doc) => doc.dirty || doc.saving || doc.conflict)) {
-      setFatalError("執行全工作區取代前，請先儲存或處理所有已開啟文件的衝突。");
+      setFatalError(t("app.workspaceReplaceBlocked"));
       return;
     }
     setLoading(true);
@@ -374,8 +375,8 @@ export default function App() {
         if (result.count) changes.push({ disk, content: result.content, count: result.count });
       }
       const total = changes.reduce((sum, change) => sum + change.count, 0);
-      if (!total) { setToast("工作區沒有可取代的結果"); return; }
-      if (!window.confirm(`將在 ${changes.length} 個檔案中取代 ${total} 處。此操作會建立檔案快照，確定繼續嗎？`)) return;
+      if (!total) { setToast(t("app.noWorkspaceReplacements")); return; }
+      if (!window.confirm(t("app.workspaceReplaceConfirm", { files: changes.length, count: total }))) return;
       for (const change of changes) {
         const saved = await saveDocument({ root, relativePath: change.disk.relativePath, content: change.content, expectedHash: change.disk.hash, profile: change.disk.profile, saveGeneration: 0 });
         searchIndex.current.update(change.disk.path, change.disk.relativePath, change.content);
@@ -387,7 +388,7 @@ export default function App() {
         });
       }
       refreshSearchResults();
-      setToast(`已在 ${changes.length} 個檔案中取代 ${total} 處`);
+      setToast(t("app.workspaceReplaced", { files: changes.length, count: total }));
     } catch (error) { setFatalError(errorMessage(error)); }
     finally { setLoading(false); }
   });
@@ -405,7 +406,7 @@ export default function App() {
       if (!report) return;
       const entries = await refreshTree();
       void indexWorkspace(root, entries);
-      setToast(`匯入完成：${report.succeeded} 成功、${report.failed} 失敗`);
+      setToast(t("app.importDone", { succeeded: report.succeeded, failed: report.failed }));
       if (report.failed > 0) setFatalError(report.files.filter((file) => file.status === "failed").slice(0, 8).map((file) => `${file.relativePath}: ${file.error}`).join("\n"));
     } catch (error) { setFatalError(errorMessage(error)); }
     finally { setLoading(false); }
@@ -416,7 +417,7 @@ export default function App() {
     setLoading(true);
     try {
       const completed = await exportWorkspace(root, settings.workspaceName);
-      if (completed) setToast("Workspace ZIP 已匯出");
+      if (completed) setToast(t("app.exportDone"));
     } catch (error) { setFatalError(errorMessage(error)); }
     finally { setLoading(false); }
   });
@@ -425,8 +426,8 @@ export default function App() {
     setToolsOpen(false);
     try {
       const orphaned = await scanOrphanAssets(root);
-      setToast(orphaned.length ? `找到 ${orphaned.length} 個孤兒資源；未刪除任何檔案` : "沒有孤兒資源");
-      if (orphaned.length) setFatalError(`孤兒資源（僅列出，未刪除）：\n${orphaned.slice(0, 20).join("\n")}`);
+      setToast(orphaned.length ? t("app.orphansFound", { count: orphaned.length }) : t("app.noOrphans"));
+      if (orphaned.length) setFatalError(t("app.orphansList", { items: orphaned.slice(0, 20).join("\n") }));
     } catch (error) { setFatalError(errorMessage(error)); }
   });
 
@@ -604,7 +605,7 @@ export default function App() {
           if (event.key === "Delete") void closeTab(doc.id);
         }}
       ><Braces /><span>{doc.title}</span>{doc.dirty && <i />}</button>
-      <button className="tab-close" aria-label={`關閉 ${doc.title}`} onClick={() => void closeTab(doc.id)}><X /></button>
+      <button className="tab-close" aria-label={t("tabs.closeDocument", { title: doc.title })} onClick={() => void closeTab(doc.id)}><X /></button>
     </div>
   );
 
@@ -643,10 +644,10 @@ export default function App() {
       <main className="welcome-screen">
         <div className="welcome-card">
           <div className="brand-lockup"><div className="brand-icon"><FileText /></div><span>LOCAL MD</span></div>
-          <h1>你的文字，<br /><em>永遠屬於你。</em></h1>
-          <p>接近 Notion 的編輯手感，以標準 Markdown 儲存在你的電腦。不需帳號、不需連線，也沒有隱藏資料庫。</p>
-          <button className="primary-button" onClick={() => void openWorkspace()} disabled={loading}><FolderOpenIcon />{loading ? "正在開啟…" : isTauri() ? "開啟 Markdown 資料夾" : "開啟示範工作區"}</button>
-          <div className="welcome-features"><span><Check />Markdown 是唯一來源</span><span><Check />Atomic save 與衝突保護</span><span><Check />預設完全離線</span></div>
+          <h1>{t("welcome.titleStart")}<br /><em>{t("welcome.titleEmphasis")}</em></h1>
+          <p>{t("welcome.description")}</p>
+          <button className="primary-button" onClick={() => void openWorkspace()} disabled={loading}><FolderOpenIcon />{loading ? t("welcome.opening") : isTauri() ? t("welcome.openFolder") : t("welcome.openDemo")}</button>
+          <div className="welcome-features"><span><Check />{t("welcome.markdownSource")}</span><span><Check />{t("welcome.safeSave")}</span><span><Check />{t("welcome.offline")}</span></div>
           {fatalError && <div className="fatal-inline"><AlertTriangle />{fatalError}</div>}
         </div>
       </main>
@@ -669,35 +670,35 @@ export default function App() {
         expandedFolders={settings.ui.expandedFolders} search={sidebarSearch}
         onOpen={(entry) => void openFile(entry)} onSelectFolder={setSelectedFolder}
         onToggleFolder={(path) => setSettings((current) => ({ ...current, ui: { ...current.ui, expandedFolders: current.ui.expandedFolders.includes(path) ? current.ui.expandedFolders.filter((item) => item !== path) : [...current.ui.expandedFolders, path] } }))}
-        onRefresh={() => void refreshTree()} onCreate={(kind) => setEntryDialog({ mode: kind === "file" ? "create-file" : "create-directory", value: kind === "file" ? "未命名.md" : "新資料夾" })}
+        onRefresh={() => void refreshTree()} onCreate={(kind) => setEntryDialog({ mode: kind === "file" ? "create-file" : "create-directory", value: kind === "file" ? t("app.untitledMarkdown") : t("app.newFolder") })}
         onRename={(entry) => setEntryDialog({ mode: "rename", value: entry.name, entry })} onDelete={(entry) => void handleDelete(entry)} onCollapse={() => setSidebarOpen(false)}
       />}
-      {sidebarOpen && <div className="panel-resizer" role="separator" aria-label="調整左側導覽寬度" aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginPanelResize("sidebar", event)} onKeyDown={(event) => resizeHandleKeyDown("sidebar", event)} />}
+      {sidebarOpen && <div className="panel-resizer" role="separator" aria-label={t("app.resizeSidebar")} aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginPanelResize("sidebar", event)} onKeyDown={(event) => resizeHandleKeyDown("sidebar", event)} />}
       <main className="workspace-main">
         <header className="topbar" data-tauri-drag-region>
           <div className="breadcrumbs" data-tauri-drag-region>
-            {!sidebarOpen && <button className="icon-button" aria-label="展開側邊欄" onClick={() => setSidebarOpen(true)}><Menu /></button>}
+            {!sidebarOpen && <button className="icon-button" aria-label={t("app.expandSidebar")} onClick={() => setSidebarOpen(true)}><Menu /></button>}
             <BookOpen />
             {breadcrumbs.map((part, index) => <span key={`${part}-${index}`}>{index > 0 && <ChevronRight />}{part}</span>)}
           </div>
           <div className="topbar-actions">
-            {activeDocument && <span className={`save-state ${activeDocument.conflict ? "conflict" : ""}`}>{activeDocument.conflict ? <><AlertTriangle />外部衝突</> : activeDocument.saving ? "儲存中…" : activeDocument.dirty ? "尚未儲存" : <><Check />已儲存</>}</span>}
-            <button className="icon-button" title="立即儲存" aria-label="立即儲存" disabled={!activeDocument || activeDocument.saving} onClick={() => activeId && void persist(activeId)}><Save /></button>
-            <button className="icon-button" title="頁面屬性" aria-label="頁面屬性" disabled={!activeDocument} onClick={() => setPropertiesOpen((value) => !value)}><PanelRightOpen /></button>
+            {activeDocument && <span className={`save-state ${activeDocument.conflict ? "conflict" : ""}`}>{activeDocument.conflict ? <><AlertTriangle />{t("app.conflict")}</> : activeDocument.saving ? t("app.saving") : activeDocument.dirty ? t("app.unsaved") : <><Check />{t("app.saved")}</>}</span>}
+            <button className="icon-button" title={t("app.saveNow")} aria-label={t("app.saveNow")} disabled={!activeDocument || activeDocument.saving} onClick={() => activeId && void persist(activeId)}><Save /></button>
+            <button className="icon-button" title={t("app.pageProperties")} aria-label={t("app.pageProperties")} disabled={!activeDocument} onClick={() => setPropertiesOpen((value) => !value)}><PanelRightOpen /></button>
             <div className="tools-menu-wrap" ref={toolsMenuRef}>
-              <button className="icon-button" title="Workspace 工具" aria-label="Workspace 工具" aria-expanded={toolsOpen} onClick={() => setToolsOpen((value) => !value)}><Settings /></button>
+              <button className="icon-button" title={t("app.workspaceTools")} aria-label={t("app.workspaceTools")} aria-expanded={toolsOpen} onClick={() => setToolsOpen((value) => !value)}><Settings /></button>
               {toolsOpen && <div className="tools-menu">
-                <label className="tools-toggle"><input type="checkbox" checked={settings.settings.autoSaveEnabled} onChange={(event) => setSettings((current) => ({ ...current, settings: { ...current.settings, autoSaveEnabled: event.target.checked } }))} /><span>自動儲存</span></label>
-                <button onClick={() => void openWorkspace()}>切換工作區</button>
-                <button onClick={() => void handleImport()}>匯入資料夾（含資源）</button>
-                <button onClick={() => void handleExport()}>匯出 Workspace ZIP</button>
-                <button onClick={() => void handleOrphanScan()}>掃描孤兒資源</button>
+                <label className="tools-toggle"><input type="checkbox" checked={settings.settings.autoSaveEnabled} onChange={(event) => setSettings((current) => ({ ...current, settings: { ...current.settings, autoSaveEnabled: event.target.checked } }))} /><span>{t("app.autoSave")}</span></label>
+                <button onClick={() => void openWorkspace()}>{t("app.switchWorkspace")}</button>
+                <button onClick={() => void handleImport()}>{t("app.importFolder")}</button>
+                <button onClick={() => void handleExport()}>{t("app.exportZip")}</button>
+                <button onClick={() => void handleOrphanScan()}>{t("app.scanOrphans")}</button>
               </div>}
             </div>
           </div>
         </header>
         <div className="tabs">
-          <div className="tabs-scroll" role="tablist" aria-label="已開啟文件">
+          <div className="tabs-scroll" role="tablist" aria-label={t("tabs.openDocuments")}>
             {settings.ui.tabGroups.length === 0 ? documents.map(renderTab) : <>
               <div className={`tab-group-zone ungrouped-tabs${tabDropTarget?.type === "group" && tabDropTarget.groupId === null ? " drop-group" : ""}`} data-tab-group="ungrouped">
                 {ungroupedDocuments.map(renderTab)}
@@ -705,47 +706,47 @@ export default function App() {
               {settings.ui.tabGroups.map((group) => {
                 const groupedDocuments = documents.filter((doc) => settings.ui.tabAssignments[doc.relativePath] === group.id);
                 return <div className={`tab-group-zone${tabDropTarget?.type === "group" && tabDropTarget.groupId === group.id ? " drop-group" : ""}`} data-tab-group={group.id} key={group.id}>
-                  <div className="tab-group-header" title="將分頁拖到這裡加入群組" style={{ boxShadow: `inset 0 3px ${group.color}` }}>
+                  <div className="tab-group-header" title={t("tabs.dropIntoGroup")} style={{ boxShadow: `inset 0 3px ${group.color}` }}>
                     <button onClick={() => toggleTabGroup(group.id)} aria-expanded={!group.collapsed}>{group.collapsed ? <ChevronRight /> : <ChevronDown />}<span>{group.name}</span><i>{groupedDocuments.length}</i></button>
-                    <button className="tab-group-remove" aria-label={`${group.name} 選單`} aria-expanded={groupMenu?.id === group.id} onClick={(event) => openTabGroupMenu(group.id, group.name, event.currentTarget)}><MoreHorizontal /></button>
+                    <button className="tab-group-remove" aria-label={t("tabs.groupMenu", { name: group.name })} aria-expanded={groupMenu?.id === group.id} onClick={(event) => openTabGroupMenu(group.id, group.name, event.currentTarget)}><MoreHorizontal /></button>
                   </div>
                   {!group.collapsed && groupedDocuments.map(renderTab)}
                 </div>;
               })}
             </>}
           </div>
-          <div className="tab-bulk-actions" aria-label="分頁關閉操作">
-            <button onClick={addTabGroup}>＋ 群組</button>
-            <button disabled={!activeId || documents.length <= 1} onClick={() => activeId && closeTabs(documents.filter((doc) => doc.id !== activeId).map((doc) => doc.id))}>關閉其他</button>
-            <button disabled={documents.length === 0} onClick={() => closeTabs(documents.map((doc) => doc.id))}>全部關閉</button>
+          <div className="tab-bulk-actions" aria-label={t("tabs.closeActions")}>
+            <button onClick={addTabGroup}>{t("tabs.addGroup")}</button>
+            <button disabled={!activeId || documents.length <= 1} onClick={() => activeId && closeTabs(documents.filter((doc) => doc.id !== activeId).map((doc) => doc.id))}>{t("tabs.closeOthers")}</button>
+            <button disabled={documents.length === 0} onClick={() => closeTabs(documents.map((doc) => doc.id))}>{t("tabs.closeAll")}</button>
           </div>
         </div>
         <section className="document-area">
-          {activeDocument ? <EditorPane key={activeDocument.id} document={activeDocument} workspaceRoot={workspaceRoot} targetText={searchTarget?.path === activeDocument.relativePath ? searchTarget.text : undefined} targetNonce={searchTarget?.nonce} onChange={updateVisualDocument} onSourceChange={updateSourceDocument} /> : <div className="empty-document"><FileText /><h2>選擇一份 Markdown 文件</h2><p>從左側工作區開啟或建立文件。</p></div>}
-          {activeDocument?.conflict && <div className="conflict-bar" role="alert"><AlertTriangle /><span>{activeDocument.conflict.diskHash === "deleted" ? "文件已被外部刪除。" : "磁碟版本已在編輯期間變更。"}</span><button onClick={() => void reloadFromDisk(activeDocument.id)} disabled={activeDocument.conflict.diskHash === "deleted"}>重新載入磁碟版本</button><button className="danger" onClick={() => void persist(activeDocument.id, true)}>以目前內容覆寫</button></div>}
-          {activeDocument && propertiesOpen && <div className="panel-resizer properties-resizer" role="separator" aria-label="調整右側屬性寬度" aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginPanelResize("properties", event)} onKeyDown={(event) => resizeHandleKeyDown("properties", event)} />}
+          {activeDocument ? <EditorPane key={activeDocument.id} document={activeDocument} workspaceRoot={workspaceRoot} targetText={searchTarget?.path === activeDocument.relativePath ? searchTarget.text : undefined} targetNonce={searchTarget?.nonce} onChange={updateVisualDocument} onSourceChange={updateSourceDocument} /> : <div className="empty-document"><FileText /><h2>{t("empty.title")}</h2><p>{t("empty.description")}</p></div>}
+          {activeDocument?.conflict && <div className="conflict-bar" role="alert"><AlertTriangle /><span>{activeDocument.conflict.diskHash === "deleted" ? t("conflict.deleted") : t("conflict.changed")}</span><button onClick={() => void reloadFromDisk(activeDocument.id)} disabled={activeDocument.conflict.diskHash === "deleted"}>{t("conflict.reload")}</button><button className="danger" onClick={() => void persist(activeDocument.id, true)}>{t("conflict.overwrite")}</button></div>}
+          {activeDocument && propertiesOpen && <div className="panel-resizer properties-resizer" role="separator" aria-label={t("app.resizeProperties")} aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginPanelResize("properties", event)} onKeyDown={(event) => resizeHandleKeyDown("properties", event)} />}
           {activeDocument && propertiesOpen && <PropertiesPanel width={settings.ui.propertiesWidth} state={activeDocument.parsed.frontMatter} onChange={updateFrontMatter} onClose={() => setPropertiesOpen(false)} />}
         </section>
-        {settingsWarning && <div className="settings-warning"><AlertTriangle />{settingsWarning}<button aria-label="關閉設定警告" onClick={() => setSettingsWarning(undefined)}><X /></button></div>}
+        {settingsWarning && <div className="settings-warning"><AlertTriangle />{settingsWarning}<button aria-label={t("app.closeSettingsWarning")} onClick={() => setSettingsWarning(undefined)}><X /></button></div>}
       </main>
-      {entryDialog && <div className="dialog-backdrop" role="presentation"><form className="entry-dialog" onSubmit={(event) => { event.preventDefault(); void submitEntryDialog(); }}><h2>{entryDialog.mode === "rename" ? "重新命名" : entryDialog.mode === "create-file" ? "新增 Markdown" : "新增資料夾"}</h2><label><span>名稱</span><input ref={entryNameInputRef} value={entryDialog.value} onChange={(event) => setEntryDialog((current) => current ? { ...current, value: event.target.value } : current)} /></label><div><button type="button" className="secondary-button" onClick={() => setEntryDialog(null)}>取消</button><button type="submit" className="primary-button" disabled={!entryDialog.value.trim()}>確認</button></div></form></div>}
+      {entryDialog && <div className="dialog-backdrop" role="presentation"><form className="entry-dialog" onSubmit={(event) => { event.preventDefault(); void submitEntryDialog(); }}><h2>{entryDialog.mode === "rename" ? t("entry.renameTitle") : entryDialog.mode === "create-file" ? t("entry.newMarkdownTitle") : t("entry.newFolderTitle")}</h2><label><span>{t("entry.name")}</span><input ref={entryNameInputRef} value={entryDialog.value} onChange={(event) => setEntryDialog((current) => current ? { ...current, value: event.target.value } : current)} /></label><div><button type="button" className="secondary-button" onClick={() => setEntryDialog(null)}>{t("common.cancel")}</button><button type="submit" className="primary-button" disabled={!entryDialog.value.trim()}>{t("common.confirm")}</button></div></form></div>}
       {groupMenu && (() => {
         const group = settings.ui.tabGroups.find((item) => item.id === groupMenu.id);
         if (!group) return null;
         const count = documents.filter((doc) => settings.ui.tabAssignments[doc.relativePath] === group.id).length;
-        return <div ref={groupMenuRef} className="tab-group-menu" role="dialog" aria-label={`${group.name} 群組設定`} style={{ left: groupMenu.left, top: groupMenu.top }}>
-          <input aria-label="群組名稱" value={groupMenu.draftName} maxLength={100} onChange={(event) => setGroupMenu((current) => current ? { ...current, draftName: event.target.value } : current)} onBlur={commitTabGroupName} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") setGroupMenu(null); }} />
-          <div className="tab-group-colors" aria-label="群組顏色">{TAB_GROUP_COLORS.map((color) => <button key={color} aria-label={`選擇顏色 ${color}`} aria-pressed={group.color === color} style={{ backgroundColor: color }} onClick={() => setTabGroupColor(group.id, color)} />)}</div>
+        return <div ref={groupMenuRef} className="tab-group-menu" role="dialog" aria-label={t("tabs.groupSettings", { name: group.name })} style={{ left: groupMenu.left, top: groupMenu.top }}>
+          <input aria-label={t("tabs.groupName")} value={groupMenu.draftName} maxLength={100} onChange={(event) => setGroupMenu((current) => current ? { ...current, draftName: event.target.value } : current)} onBlur={commitTabGroupName} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") setGroupMenu(null); }} />
+          <div className="tab-group-colors" aria-label={t("tabs.groupColor")}>{TAB_GROUP_COLORS.map((color) => <button key={color} aria-label={t("tabs.chooseColor", { color })} aria-pressed={group.color === color} style={{ backgroundColor: color }} onClick={() => setTabGroupColor(group.id, color)} />)}</div>
           <div className="tab-group-menu-actions">
-            <button disabled={count === 0} onClick={() => closeTabGroup(group.id)}><X />關閉群組 <span>{count}</span></button>
-            <button onClick={() => { removeTabGroup(group.id); setGroupMenu(null); }}><Unlink />取消分組</button>
-            <button className="danger" onClick={() => deleteTabGroup(group.id)}><Trash2 />刪除群組</button>
+            <button disabled={count === 0} onClick={() => closeTabGroup(group.id)}><X />{t("tabs.closeGroup")} <span>{count}</span></button>
+            <button onClick={() => { removeTabGroup(group.id); setGroupMenu(null); }}><Unlink />{t("tabs.ungroup")}</button>
+            <button className="danger" onClick={() => deleteTabGroup(group.id)}><Trash2 />{t("tabs.deleteGroup")}</button>
           </div>
         </div>;
       })()}
-      {loading && <div className="loading-overlay" aria-live="polite"><span />載入中…</div>}
+      {loading && <div className="loading-overlay" aria-live="polite"><span />{t("app.loading")}</div>}
       {toast && <div className="toast" role="status"><Check />{toast}</div>}
-      {fatalError && <div className="error-toast" role="alert"><AlertTriangle /><span>{fatalError}</span><button aria-label="關閉錯誤" onClick={() => setFatalError(null)}><X /></button></div>}
+      {fatalError && <div className="error-toast" role="alert"><AlertTriangle /><span>{fatalError}</span><button aria-label={t("app.closeError")} onClick={() => setFatalError(null)}><X /></button></div>}
     </div>
   );
 }

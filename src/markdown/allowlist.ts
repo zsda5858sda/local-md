@@ -2,6 +2,7 @@ import type { Root } from "mdast";
 import type { MarkdownIssue, SourcePosition } from "../domain/types";
 import { containsUnsafeHtml } from "../services/htmlSanitizer";
 import { isSupportedMdastNode, type MdNode } from "./nodeRegistry";
+import { t } from "../i18n";
 
 const REFERENCE_NODES = new Set(["definition", "linkReference", "imageReference"]);
 const SAFE_INLINE_HTML = /^(?:<\/?u>|<br\s*\/?\s*>)$/i;
@@ -47,13 +48,13 @@ export function validateAndPreserve(root: Root, source: string): ValidationResul
       const hasPlainItems = checkedStates.some((checked) => typeof checked !== "boolean");
       if (hasTaskItems && hasPlainItems) {
         compatibility = true;
-        issues.push(issue(node, "同一清單混合任務與一般項目，視覺模式無法無損表示；文件已切換相容模式。", false));
+        issues.push(issue(node, t("markdown.mixedTaskList"), false));
         return;
       }
     }
     if (REFERENCE_NODES.has(node.type)) {
       compatibility = true;
-      issues.push(issue(node, `不支援會跨區塊相依的 ${node.type} 語法，文件已切換相容模式。`, false));
+      issues.push(issue(node, t("markdown.dependentSyntax", { type: node.type }), false));
       return;
     }
     if (node.type === "html") {
@@ -61,13 +62,13 @@ export function validateAndPreserve(root: Root, source: string): ValidationResul
       if (parentType !== "root" && SAFE_INLINE_HTML.test(value.trim())) return;
       if (parentType !== "root") {
         compatibility = true;
-        issues.push(issue(node, "行內 HTML 無法安全獨立切割，文件已切換相容模式。", false));
+        issues.push(issue(node, t("markdown.inlineHtmlUnsafe"), false));
       }
       return;
     }
     if (!isSupportedMdastNode(node.type)) {
       compatibility = true;
-      issues.push(issue(node, `MDAST node「${node.type}」不在 v1 allowlist。`, false));
+      issues.push(issue(node, t("markdown.outsideAllowlist", { type: node.type }), false));
       return;
     }
     node.children?.forEach((child) => inspect(child, node.type));
@@ -81,12 +82,12 @@ export function validateAndPreserve(root: Root, source: string): ValidationResul
         nextChildren.push({
           type: "rawMarkdown",
           value: raw,
-          reason: dangerous ? "不安全或未知 HTML" : "HTML 相容區塊",
+          reason: dangerous ? t("markdown.unsafeHtmlReason") : t("markdown.compatibleHtmlReason"),
           position: child.position,
         });
         issues.push(issue(child, dangerous
-          ? "HTML 含可執行或危險內容；已隔離為原始 Markdown，不會執行。"
-          : "HTML 區塊已原樣保留。", true));
+          ? t("markdown.unsafeHtmlPreserved")
+          : t("markdown.htmlPreserved"), true));
         continue;
       }
     }

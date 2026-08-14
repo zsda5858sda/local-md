@@ -1,13 +1,17 @@
+import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import {
   Bold, Braces, Code2, Heading1, Heading2, Image, Italic, Link2, List,
   ListChecks, ListOrdered, Minus, Quote, Redo2, Strikethrough, Table2,
   Underline as UnderlineIcon, Undo2,
 } from "lucide-react";
+import { t } from "../i18n";
 
 interface ToolbarProps {
   editor: Editor | null;
 }
+
+type InputDialog = { kind: "link" | "image"; value: string };
 
 function ToolbarButton({ label, active, disabled, onClick, children }: {
   label: string;
@@ -24,50 +28,79 @@ function ToolbarButton({ label, active, disabled, onClick, children }: {
 }
 
 export function Toolbar({ editor }: ToolbarProps) {
-  if (!editor) return <div className="toolbar" aria-label="編輯工具列" />;
+  const [dialog, setDialog] = useState<InputDialog | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!dialog) return;
+    const frame = window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [dialog?.kind]);
+
+  if (!editor) return <div className="toolbar" aria-label={t("toolbar.aria")} />;
   const command = () => editor.chain().focus();
   const addLink = () => {
     const previous = editor.getAttributes("link").href as string | undefined;
-    const href = window.prompt("連結網址", previous ?? "https://");
-    if (href === null) return;
-    if (!href.trim()) editor.chain().focus().extendMarkRange("link").unsetLink().run();
-    else editor.chain().focus().extendMarkRange("link").setLink({ href: href.trim() }).run();
+    setDialog({ kind: "link", value: previous ?? "https://" });
   };
-  const addImage = () => {
-    const src = window.prompt("本機圖片相對路徑（遠端圖片預設不載入）", "./image.png");
-    if (src?.trim()) editor.chain().focus().setImage({ src: src.trim() }).run();
+  const submitDialog = () => {
+    if (!dialog) return;
+    const value = dialog.value.trim();
+    if (dialog.kind === "link") {
+      if (!value) editor.chain().focus().extendMarkRange("link").unsetLink().run();
+      else editor.chain().focus().extendMarkRange("link").setLink({ href: value }).run();
+    } else if (value) editor.chain().focus().setImage({ src: value }).run();
+    setDialog(null);
   };
   return (
-    <div className="toolbar" role="toolbar" aria-label="編輯工具列">
+    <div className="toolbar" role="toolbar" aria-label={t("toolbar.aria")}>
       <div className="tool-group">
-        <ToolbarButton label="復原" disabled={!editor.can().undo()} onClick={() => command().undo().run()}><Undo2 /></ToolbarButton>
-        <ToolbarButton label="重做" disabled={!editor.can().redo()} onClick={() => command().redo().run()}><Redo2 /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.undo")} disabled={!editor.can().undo()} onClick={() => command().undo().run()}><Undo2 /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.redo")} disabled={!editor.can().redo()} onClick={() => command().redo().run()}><Redo2 /></ToolbarButton>
       </div>
       <div className="tool-separator" />
       <div className="tool-group">
-        <ToolbarButton label="粗體" active={editor.isActive("bold")} onClick={() => command().toggleBold().run()}><Bold /></ToolbarButton>
-        <ToolbarButton label="斜體" active={editor.isActive("italic")} onClick={() => command().toggleItalic().run()}><Italic /></ToolbarButton>
-        <ToolbarButton label="底線（HTML 相容）" active={editor.isActive("underline")} onClick={() => command().toggleUnderline().run()}><UnderlineIcon /></ToolbarButton>
-        <ToolbarButton label="刪除線" active={editor.isActive("strike")} onClick={() => command().toggleStrike().run()}><Strikethrough /></ToolbarButton>
-        <ToolbarButton label="行內程式碼" active={editor.isActive("code")} onClick={() => command().toggleCode().run()}><Braces /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.bold")} active={editor.isActive("bold")} onClick={() => command().toggleBold().run()}><Bold /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.italic")} active={editor.isActive("italic")} onClick={() => command().toggleItalic().run()}><Italic /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.underline")} active={editor.isActive("underline")} onClick={() => command().toggleUnderline().run()}><UnderlineIcon /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.strike")} active={editor.isActive("strike")} onClick={() => command().toggleStrike().run()}><Strikethrough /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.inlineCode")} active={editor.isActive("code")} onClick={() => command().toggleCode().run()}><Braces /></ToolbarButton>
       </div>
       <div className="tool-separator" />
       <div className="tool-group">
-        <ToolbarButton label="標題一" active={editor.isActive("heading", { level: 1 })} onClick={() => command().toggleHeading({ level: 1 }).run()}><Heading1 /></ToolbarButton>
-        <ToolbarButton label="標題二" active={editor.isActive("heading", { level: 2 })} onClick={() => command().toggleHeading({ level: 2 }).run()}><Heading2 /></ToolbarButton>
-        <ToolbarButton label="無序清單" active={editor.isActive("bulletList")} onClick={() => command().toggleBulletList().run()}><List /></ToolbarButton>
-        <ToolbarButton label="有序清單" active={editor.isActive("orderedList")} onClick={() => command().toggleOrderedList().run()}><ListOrdered /></ToolbarButton>
-        <ToolbarButton label="任務清單" active={editor.isActive("taskList")} onClick={() => command().toggleTaskList().run()}><ListChecks /></ToolbarButton>
-        <ToolbarButton label="引言" active={editor.isActive("blockquote")} onClick={() => command().toggleBlockquote().run()}><Quote /></ToolbarButton>
-        <ToolbarButton label="程式碼區塊" active={editor.isActive("codeBlock")} onClick={() => command().toggleCodeBlock().run()}><Code2 /></ToolbarButton>
-        <ToolbarButton label="分隔線" onClick={() => command().setHorizontalRule().run()}><Minus /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.heading1")} active={editor.isActive("heading", { level: 1 })} onClick={() => command().toggleHeading({ level: 1 }).run()}><Heading1 /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.heading2")} active={editor.isActive("heading", { level: 2 })} onClick={() => command().toggleHeading({ level: 2 }).run()}><Heading2 /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.bulletList")} active={editor.isActive("bulletList")} onClick={() => command().toggleBulletList().run()}><List /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.orderedList")} active={editor.isActive("orderedList")} onClick={() => command().toggleOrderedList().run()}><ListOrdered /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.taskList")} active={editor.isActive("taskList")} onClick={() => command().toggleTaskList().run()}><ListChecks /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.blockquote")} active={editor.isActive("blockquote")} onClick={() => command().toggleBlockquote().run()}><Quote /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.codeBlock")} active={editor.isActive("codeBlock")} onClick={() => command().toggleCodeBlock().run()}><Code2 /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.horizontalRule")} onClick={() => command().setHorizontalRule().run()}><Minus /></ToolbarButton>
       </div>
       <div className="tool-separator" />
       <div className="tool-group">
-        <ToolbarButton label="插入連結" active={editor.isActive("link")} onClick={addLink}><Link2 /></ToolbarButton>
-        <ToolbarButton label="插入圖片" onClick={addImage}><Image /></ToolbarButton>
-        <ToolbarButton label="插入 3 × 3 表格" onClick={() => command().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table2 /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.insertLink")} active={editor.isActive("link")} onClick={addLink}><Link2 /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.insertImage")} onClick={() => setDialog({ kind: "image", value: "./image.png" })}><Image /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.insertTable")} onClick={() => command().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table2 /></ToolbarButton>
       </div>
+      {dialog && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDialog(null); }}>
+          <form className="entry-dialog toolbar-input-dialog" role="dialog" aria-modal="true" aria-labelledby="toolbar-dialog-title" onSubmit={(event) => { event.preventDefault(); submitDialog(); }} onKeyDown={(event) => { if (event.key === "Escape") setDialog(null); }}>
+            <h2 id="toolbar-dialog-title">{t(dialog.kind === "link" ? "toolbar.linkDialogTitle" : "toolbar.imageDialogTitle")}</h2>
+            <label>
+              <span>{t(dialog.kind === "link" ? "toolbar.linkField" : "toolbar.imageField")}</span>
+              <input ref={inputRef} value={dialog.value} onChange={(event) => setDialog({ ...dialog, value: event.target.value })} inputMode="url" />
+            </label>
+            <div>
+              <button type="button" className="secondary-button" onClick={() => setDialog(null)}>{t("common.cancel")}</button>
+              <button type="submit" className="primary-button" disabled={dialog.kind === "image" && !dialog.value.trim()}>{t("common.confirm")}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

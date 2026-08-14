@@ -174,7 +174,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .tool-button:disabled { opacity: .3; cursor: default; }
 .tool-button svg { width: 15px; }
 .tool-separator { width: 1px; height: 19px; margin: 0 4px; background: var(--line); }
-.editor-scroll { min-height: 0; flex: 1; overflow: auto; background: var(--paper); }
+.editor-scroll { position: relative; min-height: 0; flex: 1; overflow: auto; background: var(--paper); }
 .ProseMirror { min-height: calc(100vh - 138px); max-width: 850px; margin: 0 auto; padding: 68px 76px 180px; caret-color: var(--green); }
 .ProseMirror:focus { outline: none; }
 .ProseMirror > *:first-child { margin-top: 0; }
@@ -196,9 +196,20 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .ProseMirror ul[data-type="taskList"] li { display: flex; gap: 9px; }
 .ProseMirror ul[data-type="taskList"] li > label { padding-top: 4px; }
 .ProseMirror ul[data-type="taskList"] li > div { flex: 1; }
+.ProseMirror .tableWrapper { overflow-x: auto; }
 .ProseMirror table { width: 100%; margin: 1.6em 0; border-collapse: collapse; table-layout: fixed; }
-.ProseMirror th, .ProseMirror td { min-width: 80px; padding: 8px 10px; border: 1px solid #cfcdbf; vertical-align: top; }
+.ProseMirror th, .ProseMirror td { position: relative; min-width: 80px; padding: 8px 10px; border: 1px solid #cfcdbf; vertical-align: top; }
 .ProseMirror th { background: #efeee8; text-align: left; }
+.ProseMirror td p, .ProseMirror th p { margin: 0; padding: 2px 0; line-height: 1.45; }
+.ProseMirror .column-resize-handle { position: absolute; z-index: 20; top: 0; right: -2px; bottom: -2px; width: 4px; background: #3b8f70; pointer-events: none; }
+.ProseMirror.resize-cursor, .ProseMirror.resize-cursor * { cursor: col-resize !important; }
+.table-controls { position: absolute; z-index: 30; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 7px; background: rgba(253,252,249,.97); box-shadow: 0 5px 18px rgba(38,37,32,.14); opacity: .9; transition: opacity .12s ease, box-shadow .12s ease; }
+.table-controls:hover, .table-controls:focus-within { opacity: 1; box-shadow: 0 7px 22px rgba(38,37,32,.2); }
+.table-controls span { display: flex; align-items: center; gap: 3px; padding: 0 4px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.table-controls span svg, .table-controls button svg { width: 13px; height: 13px; }
+.table-controls button { width: 25px; height: 25px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #615e56; cursor: pointer; }
+.table-controls button:hover { background: #e7eee9; color: var(--green); }
+.table-controls i { width: 1px; height: 18px; margin: 0 2px; background: var(--line); }
 .ProseMirror hr { margin: 34px 0; border: 0; border-top: 1px solid #d0cec4; }
 .ProseMirror img { max-width: 100%; border-radius: 4px; }
 .safe-image-node { display: inline; }
@@ -245,6 +256,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .entry-dialog input { width: 100%; padding: 10px 11px; border: 1px solid var(--line); background: white; border-radius: 6px; }
 .entry-dialog > div { display: flex; justify-content: flex-end; gap: 8px; }
 .entry-dialog .primary-button { padding: 8px 13px; box-shadow: none; }
+.toolbar-input-dialog { text-align: left; }
 .loading-overlay { position: fixed; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; background: rgba(248,247,243,.7); backdrop-filter: blur(2px); z-index: 50; color: var(--muted); font-size: 12px; }
 .loading-overlay span { width: 26px; height: 26px; border: 2px solid #b9cfc6; border-top-color: var(--green); border-radius: 50%; animation: spin .8s linear infinite; }
 .toast, .error-toast { position: fixed; z-index: 60; display: flex; align-items: center; gap: 8px; box-shadow: 0 8px 30px rgba(44,41,35,.2); border-radius: 7px; font-size: 12px; }

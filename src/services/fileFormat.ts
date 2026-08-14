@@ -2,6 +2,7 @@ import chardet from "chardet";
 import iconv from "iconv-lite";
 import { Buffer } from "buffer";
 import type { FileFormatProfile } from "../domain/types";
+import { t } from "../i18n";
 
 const ENCODING_MAP: Record<string, FileFormatProfile["encoding"]> = {
   utf8: "utf-8",
@@ -39,7 +40,7 @@ export function decodeFile(bytes: Uint8Array, confidenceThreshold = 0.55): Decod
   const encoding = ENCODING_MAP[normalizedName] ?? ENCODING_MAP[normalizedName.replace(/_/g, "-")];
   const confidence = Number(first?.confidence ?? 0) / 100;
   if (!encoding || confidence < confidenceThreshold) {
-    throw new Error(`編碼不確定（${first?.name ?? "unknown"}，信心 ${Math.round(confidence * 100)}%）`);
+    throw new Error(t("encoding.uncertain", { name: first?.name ?? "unknown", confidence: Math.round(confidence * 100) }));
   }
   const decoded = iconv.decode(Buffer.from(payload), encoding);
   return {
@@ -55,7 +56,7 @@ export function encodeFile(text: string, profile: FileFormatProfile): Uint8Array
   const encoded = iconv.encode(diskText, profile.encoding);
   const roundTrip = iconv.decode(encoded, profile.encoding);
   if (roundTrip !== diskText) {
-    throw new Error(`內容包含 ${profile.encoding} 無法表示的字元；請先轉換為 UTF-8。`);
+    throw new Error(t("encoding.lossy", { encoding: profile.encoding }));
   }
   if (profile.bom === "utf8" && profile.encoding === "utf-8") {
     return Uint8Array.from([0xef, 0xbb, 0xbf, ...encoded]);
@@ -64,4 +65,3 @@ export function encodeFile(text: string, profile: FileFormatProfile): Uint8Array
 }
 
 export const UTF8_LF: FileFormatProfile = { encoding: "utf-8", bom: "none", eol: "lf" };
-

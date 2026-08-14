@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
@@ -13,6 +13,8 @@ import { MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
 import { loadWorkspaceAsset } from "../services/desktop";
 import { sanitizeHtml } from "../services/htmlSanitizer";
 import { Toolbar } from "./Toolbar";
+import { TableControls } from "./TableControls";
+import { t } from "../i18n";
 
 const lowlight = createLowlight(common);
 
@@ -45,6 +47,7 @@ function hasLocalImage(node: TiptapNode): boolean {
 }
 
 export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, targetText, targetNonce }: EditorPaneProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false, link: false, underline: false }),
@@ -63,7 +66,7 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
     ],
     content: document.parsed.doc,
     editorProps: {
-      attributes: { class: "prose-editor", "aria-label": `編輯 ${document.title}`, spellcheck: "true" },
+      attributes: { class: "prose-editor", "aria-label": t("editor.aria", { title: document.title }), spellcheck: "true" },
       handlePaste: (view, event) => {
         const html = event.clipboardData?.getData("text/html") ?? "";
         if (!html) return false;
@@ -116,10 +119,10 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
     return (
       <div className="source-mode">
         <div className="compatibility-banner" role="alert">
-          <strong>相容純文字模式</strong>
-          <span>此文件含無法安全切割的語法。內容不會經過視覺編輯器重建。</span>
+          <strong>{t("editor.compatibilityTitle")}</strong>
+          <span>{t("editor.compatibilityDescription")}</span>
         </div>
-        <textarea aria-label={`${document.title} 原始 Markdown`} value={document.parsed.source} onChange={(event) => onSourceChange(event.target.value)} spellCheck={false} />
+        <textarea aria-label={t("editor.sourceAria", { title: document.title })} value={document.parsed.source} onChange={(event) => onSourceChange(event.target.value)} spellCheck={false} />
       </div>
     );
   }
@@ -129,11 +132,14 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
       <Toolbar editor={editor} />
       {document.parsed.issues.length > 0 && (
         <details className="issue-banner">
-          <summary>{document.parsed.issues.length} 項相容性提醒</summary>
+          <summary>{t("editor.compatibilityIssues", { count: document.parsed.issues.length })}</summary>
           <ul>{document.parsed.issues.map((issue, index) => <li key={`${issue.message}-${index}`}>{issue.message}</li>)}</ul>
         </details>
       )}
-      <div className="editor-scroll"><EditorContent editor={editor} /></div>
+      <div ref={scrollRef} className="editor-scroll">
+        <EditorContent editor={editor} />
+        <TableControls editor={editor} containerRef={scrollRef} />
+      </div>
     </div>
   );
 }
