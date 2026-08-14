@@ -5,6 +5,7 @@ Local MD 是依照《Local-first 區塊式 Markdown 編輯器系統設計規劃�
 ## 已實作
 
 - Tiptap / ProseMirror 區塊式編輯器與多分頁 UI。
+- 表格支援欄寬拖曳、緊湊列高，以及新增／刪除列欄與刪除整張表格的浮動控制列。
 - 分頁可拖曳重新排序，並可關閉目前分頁、其他分頁或全部分頁。
 - 分頁群組預設不啟用；可新增群組、拖入／移出分頁及折疊群組。
 - 群組支援修改名稱、九種顏色、關閉群組、取消分組與刪除群組。
@@ -102,6 +103,61 @@ pnpm tauri build --debug --no-bundle --ci
 
 Windows 輸出位於 `src-tauri/target/debug/local-md.exe`。
 
+## Windows 正式打包
+
+專案根目錄提供 [`build-windows.bat`](./build-windows.bat)，可一次完成前端 production build、Rust release build，以及 Windows 安裝包封裝。
+
+在 PowerShell 進入專案目錄後執行：
+
+```powershell
+.\build-windows.bat
+```
+
+批次檔會依序：
+
+1. 檢查 Node.js、pnpm 與 Rust/Cargo。
+2. 系統 `PATH` 找不到 Node.js/pnpm 時，嘗試使用 Codex 隨附的 runtime。
+3. 系統 `PATH` 找不到 Cargo 時，嘗試使用 `%USERPROFILE%\.cargo\bin`。
+4. 執行 `pnpm tauri build`。
+5. 成功後顯示執行檔與安裝包的實際路徑。
+
+看到以下訊息代表完整打包成功：
+
+```text
+[SUCCESS] Local MD build completed.
+```
+
+若失敗，批次檔會回傳非零 exit code，並顯示：
+
+```text
+[ERROR] Build failed. Review the messages above for details.
+```
+
+PowerShell 可用 `$LASTEXITCODE` 再次確認；`0` 表示成功，非 `0` 表示失敗。
+
+### 正式產物
+
+| 類型 | 輸出位置 |
+| --- | --- |
+| 直接執行檔 | `src-tauri/target/release/local-md.exe` |
+| NSIS 安裝程式 | `src-tauri/target/release/bundle/nsis/*.exe` |
+| MSI 安裝程式 | `src-tauri/target/release/bundle/msi/*.msi` |
+
+只建立特定格式時，可將 Tauri build 參數直接傳給批次檔：
+
+```powershell
+# 只封裝一般 Windows Setup.exe
+.\build-windows.bat --bundles nsis
+
+# 只封裝 MSI
+.\build-windows.bat --bundles msi
+
+# 只建立 release 執行檔，不建立安裝包
+.\build-windows.bat --no-bundle
+```
+
+第一次在新的開發環境建置時，仍建議先執行 `pnpm install`。若電腦沒有 Codex runtime，請安裝 Node.js LTS、pnpm 與 Rust stable，並重新開啟終端機。
+
 ## 驗證
 
 ```powershell
@@ -112,7 +168,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 ```
 
-目前驗證結果：TypeScript typecheck、38 個前端測試、7 個 Rust 測試及 Tauri 桌面整合建置均通過。
+目前驗證結果：TypeScript typecheck、65 個前端測試、14 個 Rust 測試及 Tauri release／Windows 安裝包建置均通過。
 
 測試涵蓋 canonical semantic round-trip、Soft / Hard Break、多層與 loose / tight list、自訂 ordered-list start、task list、CJK / emoji table、code fence、YAML / TOML front-matter、reference-link compatibility、危險 HTML 隔離、property-based 生成案例、encoding、link rewrite、raw-source 搜尋定位、搜尋取代、分頁排序、自動儲存 revision 與快捷鍵白名單。
 

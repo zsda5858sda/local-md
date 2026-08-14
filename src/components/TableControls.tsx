@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { RefObject } from "react";
 import type { Editor } from "@tiptap/react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Columns3, Rows3, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Columns3, Rows3, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
 
 interface TableControlsProps {
@@ -79,6 +79,11 @@ export function TableControls({ editor, containerRef }: TableControlsProps) {
       {button(t("table.addColumnBefore"), () => editor.commands.addColumnBefore(), <ArrowLeft />)}
       {button(t("table.addColumnAfter"), () => editor.commands.addColumnAfter(), <ArrowRight />)}
       {button(t("table.deleteColumn"), () => editor.commands.deleteColumn(), <Trash2 />)}
+      <i />
+      {button(t("table.deleteTable"), () => {
+        if (!window.confirm(t("table.deleteTableConfirm"))) return false;
+        return editor.commands.deleteTable();
+      }, <X />)}
     </div>
   );
 }

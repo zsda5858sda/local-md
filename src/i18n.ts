@@ -179,6 +179,8 @@ const zhTW = {
   "table.addColumnBefore": "在左側新增欄",
   "table.addColumnAfter": "在右側新增欄",
   "table.deleteColumn": "刪除目前欄",
+  "table.deleteTable": "刪除整個表格",
+  "table.deleteTableConfirm": "確定要刪除整個表格嗎？此操作無法復原。",
 } as const;
 
 export type MessageKey = keyof typeof zhTW;
