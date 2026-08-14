@@ -159,6 +159,12 @@ struct ImportFileResult {
     error: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportedImageAsset {
+    relative_path: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PanelLimits {
@@ -242,8 +248,17 @@ fn sniff_image_mime(bytes: &[u8]) -> Option<&'static str> {
         [0x47, 0x49, 0x46, 0x38, ..] => Some("image/gif"),
         bytes if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") => Some("image/webp"),
         [0x42, 0x4D, ..] => Some("image/bmp"),
+        bytes if sniff_svg(bytes) => Some("image/svg+xml"),
         _ => None,
     }
+}
+
+fn sniff_svg(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else { return false; };
+    let text = text.trim_start_matches('\u{feff}').trim_start();
+    if text.starts_with("<svg") { return true; }
+    text.starts_with("<?xml")
+        && text.find("<svg").is_some_and(|position| position < 512)
 }
 
 fn scan_directory(root: &Path, directory: &Path) -> Result<Vec<WorkspaceEntry>, String> {
@@ -655,7 +670,8 @@ fn read_workspace_asset(root: String, document_relative_path: String, asset_refe
         "gif" => "image/gif",
         "webp" => "image/webp",
         "bmp" => "image/bmp",
-        _ => return Err("只允許載入 PNG、JPEG、GIF、WebP 或 BMP 圖片".into()),
+        "svg" => "image/svg+xml",
+        _ => return Err("只允許載入 PNG、JPEG、GIF、WebP、SVG 或 BMP 圖片".into()),
     };
     let metadata = fs::metadata(&path).map_err(|error| format!("讀取圖片資訊失敗：{error}"))?;
     if metadata.len() > MAX_IMAGE_BYTES { return Err("圖片超過 20 MB 限制".into()); }
@@ -666,6 +682,92 @@ fn read_workspace_asset(root: String, document_relative_path: String, asset_refe
         return Err("圖片副檔名與檔案內容不符".into());
     }
     Ok(Some(format!("data:{mime};base64,{}", BASE64.encode(bytes))))
+}
+
+fn image_extension_and_mime(path: &Path) -> Result<(String, &'static str), String> {
+    let extension = path.extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let mime = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        _ => return Err("只允許匯入 PNG、JPEG、GIF、WebP、SVG 或 BMP 圖片".into()),
+    };
+    Ok((extension, mime))
+}
+
+fn sanitized_image_stem(path: &Path) -> String {
+    let raw = path.file_stem().and_then(|value| value.to_str()).unwrap_or("image");
+    let mut sanitized = String::with_capacity(raw.len().min(64));
+    let mut previous_dash = false;
+    for character in raw.chars() {
+        if sanitized.chars().count() >= 64 { break; }
+        if character.is_alphanumeric() || matches!(character, '-' | '_') {
+            sanitized.push(character);
+            previous_dash = false;
+        } else if !previous_dash {
+            sanitized.push('-');
+            previous_dash = true;
+        }
+    }
+    let sanitized = sanitized.trim_matches(['-', '_']);
+    if sanitized.is_empty() { "image".into() } else { sanitized.into() }
+}
+
+#[tauri::command]
+fn import_image_asset(root: String, document_relative_path: String, source_path: String) -> Result<ImportedImageAsset, SaveError> {
+    let canonical_workspace = canonical_root(&root)?;
+    let document_relative = validate_relative(&document_relative_path)?;
+    let (_, document_path) = scoped_path(&root, &document_relative_path, true)?;
+    if !document_path.is_file() || !is_markdown(&document_path) {
+        return Err("圖片只能匯入至 Workspace 內既有的 Markdown 文件".into());
+    }
+
+    let source_input = Path::new(&source_path);
+    if !source_input.is_absolute() || source_input.components().any(|part| matches!(part, Component::ParentDir)) {
+        return Err("圖片來源必須是不含 .. 的絕對檔案路徑".into());
+    }
+    let source = fs::canonicalize(source_input).map_err(|error| format!("圖片來源無法開啟：{error}"))?;
+    if !source.is_file() { return Err("圖片來源不是檔案".into()); }
+    let metadata = fs::metadata(&source).map_err(|error| format!("讀取圖片資訊失敗：{error}"))?;
+    if metadata.len() > MAX_IMAGE_BYTES { return Err("圖片超過 20 MB 限制".into()); }
+
+    let (extension, expected_mime) = image_extension_and_mime(&source)?;
+    let bytes = fs::read(&source).map_err(|error| format!("讀取圖片失敗：{error}"))?;
+    if sniff_image_mime(&bytes) != Some(expected_mime) {
+        return Err("圖片副檔名與檔案內容不符".into());
+    }
+
+    let document_parent = document_relative.parent().unwrap_or(Path::new(""));
+    let asset_directory = document_parent.join("assets");
+    let stem = sanitized_image_stem(&source);
+    let short_hash = &hash_bytes(&bytes)[..8];
+    let mut attempt = 0_u32;
+    let (destination, file_name) = loop {
+        let suffix = if attempt == 0 { String::new() } else { format!("-{attempt}") };
+        let file_name = format!("{stem}-{short_hash}{suffix}.{extension}");
+        let relative = asset_directory.join(&file_name);
+        let destination = secure_import_destination(&canonical_workspace, &relative)?;
+        match fs::OpenOptions::new().write(true).create_new(true).open(&destination) {
+            Ok(mut file) => {
+                file.write_all(&bytes).map_err(|error| format!("寫入圖片失敗：{error}"))?;
+                file.sync_all().map_err(|error| format!("同步圖片失敗：{error}"))?;
+                break (destination, file_name);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                attempt = attempt.checked_add(1).ok_or("無法產生唯一圖片檔名")?;
+            }
+            Err(error) => return Err(format!("建立圖片檔案失敗：{error}").into()),
+        }
+    };
+    debug_assert!(destination.starts_with(&canonical_workspace));
+    let relative_path = Path::new("assets").join(file_name).to_string_lossy().replace('\\', "/");
+    Ok(ImportedImageAsset { relative_path })
 }
 
 fn secure_import_destination(root: &Path, relative: &Path) -> Result<PathBuf, String> {
@@ -812,6 +914,7 @@ pub fn run() {
             read_workspace_settings,
             write_workspace_settings,
             read_workspace_asset,
+            import_image_asset,
             watch_workspace,
             import_workspace,
             export_workspace,
@@ -916,7 +1019,47 @@ mod tests {
         assert_eq!(sniff_image_mime(b"GIF89a"), Some("image/gif"));
         assert_eq!(sniff_image_mime(b"RIFF\x01\x00\x00\x00WEBP"), Some("image/webp"));
         assert_eq!(sniff_image_mime(b"BM"), Some("image/bmp"));
+        assert_eq!(sniff_image_mime(b"<?xml version=\"1.0\"?><svg></svg>"), Some("image/svg+xml"));
         assert_eq!(sniff_image_mime(b"RIFF"), None);
+    }
+
+    #[test]
+    fn imports_image_next_to_document_without_overwriting() {
+        let workspace = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        fs::create_dir(workspace.path().join("notes")).unwrap();
+        fs::write(workspace.path().join("notes/note.md"), b"# note\n").unwrap();
+        let source_path = source.path().join("My photo.png");
+        fs::write(&source_path, [0x89, 0x50, 0x4e, 0x47, 0x01]).unwrap();
+
+        let first = import_image_asset(
+            workspace.path().to_string_lossy().into(),
+            "notes/note.md".into(),
+            source_path.to_string_lossy().into(),
+        ).unwrap();
+        let second = import_image_asset(
+            workspace.path().to_string_lossy().into(),
+            "notes/note.md".into(),
+            source_path.to_string_lossy().into(),
+        ).unwrap();
+
+        assert!(first.relative_path.starts_with("assets/My-photo-"));
+        assert_ne!(first.relative_path, second.relative_path);
+        assert_eq!(fs::read(workspace.path().join("notes").join(&first.relative_path)).unwrap(), [0x89, 0x50, 0x4e, 0x47, 0x01]);
+        assert!(workspace.path().join("notes").join(second.relative_path).exists());
+    }
+
+    #[test]
+    fn image_import_rejects_document_path_escape() {
+        let workspace = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let source_path = source.path().join("photo.png");
+        fs::write(&source_path, [0x89, 0x50, 0x4e, 0x47]).unwrap();
+        assert!(import_image_asset(
+            workspace.path().to_string_lossy().into(),
+            "../note.md".into(),
+            source_path.to_string_lossy().into(),
+        ).is_err());
     }
 
     #[test]

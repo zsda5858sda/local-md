@@ -190,6 +190,22 @@ export async function importFolder(targetRoot: string): Promise<ImportReport | n
   return invoke("import_workspace", { source, target: targetRoot });
 }
 
+export interface ImportedImageAsset {
+  relativePath: string;
+}
+
+export async function chooseAndImportImage(root: string, documentRelativePath: string): Promise<ImportedImageAsset | null> {
+  if (!isTauri()) return null;
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    title: t("desktop.chooseImage"),
+    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"] }],
+  });
+  if (typeof selected !== "string") return null;
+  return invoke("import_image_asset", { root, documentRelativePath, sourcePath: selected });
+}
+
 export async function exportWorkspace(root: string, workspaceName: string): Promise<boolean> {
   if (!isTauri()) return false;
   const destination = await save({

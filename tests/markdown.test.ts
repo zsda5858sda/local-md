@@ -4,12 +4,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { generateHTML } from "@tiptap/core";
+import { Editor, generateHTML } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { parseMarkdown, semanticRoundTrip, serializeMarkdown } from "../src/markdown/pipeline";
 import { containsUnsafeHtml, sanitizeHtml } from "../src/services/htmlSanitizer";
 import { NODE_REGISTRY, isRegisteredTiptapNode, isSupportedMdastNode } from "../src/markdown/nodeRegistry";
-import { AnnotatedLink, createSafeImageNodeView, externalHttpLinkFromTarget, linkHrefFromTarget } from "../src/editor/extensions";
+import { AnnotatedLink, externalHttpLinkFromTarget, linkHrefFromTarget, SafeImage } from "../src/editor/extensions";
 import type { TiptapNode } from "../src/domain/types";
 
 const fixture = (name: string) => readFileSync(resolve(process.cwd(), "tests", "fixtures", name), "utf8");
@@ -141,13 +141,47 @@ describe("canonical Markdown round-trip", () => {
   });
 
   it("blocks remote images until an explicit click", () => {
-    const view = createSafeImageNodeView({ src: "https://tracker.example/pixel.png", markdownSrc: "https://tracker.example/pixel.png", alt: "remote" });
-    expect(view.dom.className).toBe("remote-image-placeholder");
-    expect(view.dom.querySelector("img")).toBeNull();
-    expect(view.dom.querySelector("[src]")).toBeNull();
-    view.dom.click();
-    expect(view.dom.querySelector("img")?.getAttribute("src")).toBe("https://tracker.example/pixel.png");
-    view.destroy();
+    const element = document.createElement("div");
+    const editor = new Editor({
+      element,
+      extensions: [StarterKit, SafeImage.configure({ inline: true, allowBase64: false })],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "https://tracker.example/pixel.png", markdownSrc: "https://tracker.example/pixel.png", alt: "remote" } }] }] },
+    });
+    const figure = element.querySelector("figure.safe-image-node");
+    const placeholder = figure?.querySelector<HTMLElement>(".remote-image-placeholder");
+    expect((figure as HTMLElement | null)?.draggable).toBe(true);
+    expect(figure?.querySelector(".image-drag-handle")).toBeNull();
+    expect(placeholder).not.toBeNull();
+    expect(figure?.querySelector("img")).toBeNull();
+    expect(figure?.querySelector("[src]")).toBeNull();
+    placeholder?.click();
+    const image = figure?.querySelector("img");
+    expect(image?.getAttribute("src")).toBe("https://tracker.example/pixel.png");
+    expect(image?.draggable).toBe(false);
+    editor.destroy();
+  });
+
+  it("edits captions and deletes images through node-view controls", () => {
+    const element = document.createElement("div");
+    const editor = new Editor({
+      element,
+      extensions: [StarterKit, SafeImage.configure({ inline: true, allowBase64: false })],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "assets/photo.png", alt: "photo" } }] }] },
+    });
+    const captionButton = element.querySelector<HTMLButtonElement>(".image-toolbar-btn");
+    expect(captionButton).not.toBeNull();
+    captionButton?.click();
+    const caption = element.querySelector<HTMLElement>("figcaption.image-caption");
+    expect(caption).not.toBeNull();
+    if (caption) {
+      caption.textContent = "圖片說明";
+      caption.dispatchEvent(new Event("blur"));
+    }
+    const imageNode = (editor.getJSON() as TiptapNode).content?.[0]?.content?.[0];
+    expect(imageNode?.attrs?.caption).toBe("圖片說明");
+    element.querySelector<HTMLButtonElement>(".image-toolbar-danger")?.click();
+    expect(element.querySelector("figure.safe-image-node")).toBeNull();
+    editor.destroy();
   });
 
   it("renders link destinations as native hover titles", () => {

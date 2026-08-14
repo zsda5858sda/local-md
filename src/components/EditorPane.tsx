@@ -8,7 +8,7 @@ import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 import type { OpenDocument, TiptapNode } from "../domain/types";
-import { AnnotatedLink, handleEditorLinkClick, LinkShortcut, MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
+import { AnnotatedLink, handleEditorLinkClick, IMAGE_ZOOM_REQUESTED_EVENT, LinkShortcut, MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
 import { loadWorkspaceAsset, openExternalLink } from "../services/desktop";
 import { sanitizeHtml } from "../services/htmlSanitizer";
 import { Toolbar } from "./Toolbar";
@@ -48,6 +48,7 @@ function hasLocalImage(node: TiptapNode): boolean {
 export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, targetText, targetNonce }: EditorPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pendingLink, setPendingLink] = useState<string | null>(null);
+  const [zoomedImage, setZoomedImage] = useState<{ src: string; alt: string } | null>(null);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false, link: false, underline: false }),
@@ -123,6 +124,26 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
     }
   }, [editor, targetNonce, targetText]);
 
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const editorElement = editor.view.dom;
+    const onZoom = (event: Event) => {
+      const detail = (event as CustomEvent<{ src: string; alt: string }>).detail;
+      if (detail?.src) setZoomedImage(detail);
+    };
+    editorElement.addEventListener(IMAGE_ZOOM_REQUESTED_EVENT, onZoom);
+    return () => editorElement.removeEventListener(IMAGE_ZOOM_REQUESTED_EVENT, onZoom);
+  }, [editor]);
+
+  useEffect(() => {
+    if (!zoomedImage) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setZoomedImage(null);
+    };
+    globalThis.document.addEventListener("keydown", closeOnEscape);
+    return () => globalThis.document.removeEventListener("keydown", closeOnEscape);
+  }, [zoomedImage]);
+
   if (document.parsed.mode === "compatibility") {
     return (
       <div className="source-mode">
@@ -137,7 +158,7 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
 
   return (
     <div className="editor-pane">
-      <Toolbar editor={editor} />
+      <Toolbar editor={editor} workspaceRoot={workspaceRoot} documentRelativePath={document.relativePath} />
       {document.parsed.issues.length > 0 && (
         <details className="issue-banner">
           <summary>{t("editor.compatibilityIssues", { count: document.parsed.issues.length })}</summary>
@@ -158,6 +179,12 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
               <button type="button" className="primary-button" autoFocus onClick={() => { void openExternalLink(pendingLink); setPendingLink(null); }}>{t("link.openInBrowser")}</button>
             </div>
           </div>
+        </div>
+      )}
+      {zoomedImage && (
+        <div className="image-lightbox-backdrop" role="dialog" aria-modal="true" aria-label={t("image.zoom")} onMouseDown={(event) => { if (event.target === event.currentTarget) setZoomedImage(null); }}>
+          <img className="image-lightbox-img" src={zoomedImage.src} alt={zoomedImage.alt} />
+          <button type="button" className="image-lightbox-close" aria-label={t("common.close")} autoFocus onClick={() => setZoomedImage(null)}>×</button>
         </div>
       )}
     </div>
