@@ -117,6 +117,7 @@ describe("keyboard shortcuts", () => {
 
   it("keeps editor formatting shortcuts", () => {
     expect(shortcut("b", { ctrlKey: true })).toBe("allow-editor");
+    expect(shortcut("k", { ctrlKey: true })).toBe("allow-editor");
     expect(shortcut("u", { ctrlKey: true })).toBe("allow-editor");
     expect(shortcut("8", { ctrlKey: true, shiftKey: true })).toBe("allow-editor");
   });

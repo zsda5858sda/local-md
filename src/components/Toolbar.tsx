@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import {
   Bold, Braces, Code2, Heading1, Heading2, Image, Italic, Link2, List,
@@ -6,6 +6,7 @@ import {
   Underline as UnderlineIcon, Undo2,
 } from "lucide-react";
 import { t } from "../i18n";
+import { INSERT_LINK_REQUESTED_EVENT } from "../editor/extensions";
 
 interface ToolbarProps {
   editor: Editor | null;
@@ -31,6 +32,12 @@ export function Toolbar({ editor }: ToolbarProps) {
   const [dialog, setDialog] = useState<InputDialog | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const addLink = useCallback(() => {
+    if (!editor) return;
+    const href = editor.getAttributes("link").href;
+    setDialog({ kind: "link", value: typeof href === "string" ? href : "https://" });
+  }, [editor]);
+
   useEffect(() => {
     if (!dialog) return;
     const frame = window.requestAnimationFrame(() => {
@@ -40,12 +47,15 @@ export function Toolbar({ editor }: ToolbarProps) {
     return () => window.cancelAnimationFrame(frame);
   }, [dialog?.kind]);
 
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const editorElement = editor.view.dom;
+    editorElement.addEventListener(INSERT_LINK_REQUESTED_EVENT, addLink);
+    return () => editorElement.removeEventListener(INSERT_LINK_REQUESTED_EVENT, addLink);
+  }, [addLink, editor]);
+
   if (!editor) return <div className="toolbar" aria-label={t("toolbar.aria")} />;
   const command = () => editor.chain().focus();
-  const addLink = () => {
-    const previous = editor.getAttributes("link").href as string | undefined;
-    setDialog({ kind: "link", value: previous ?? "https://" });
-  };
   const submitDialog = () => {
     if (!dialog) return;
     const value = dialog.value.trim();

@@ -800,6 +800,7 @@ fn scan_orphan_assets(root: String) -> Result<Vec<String>, SaveError> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
         .manage(WatchState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             scan_workspace,

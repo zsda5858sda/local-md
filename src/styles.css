@@ -257,6 +257,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .entry-dialog > div { display: flex; justify-content: flex-end; gap: 8px; }
 .entry-dialog .primary-button { padding: 8px 13px; box-shadow: none; }
 .toolbar-input-dialog { text-align: left; }
+.external-link-warning { margin: 0; white-space: pre-wrap; word-break: break-all; line-height: 1.65; }
 .loading-overlay { position: fixed; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; background: rgba(248,247,243,.7); backdrop-filter: blur(2px); z-index: 50; color: var(--muted); font-size: 12px; }
 .loading-overlay span { width: 26px; height: 26px; border: 2px solid #b9cfc6; border-top-color: var(--green); border-radius: 50%; animation: spin .8s linear infinite; }
 .toast, .error-toast { position: fixed; z-index: 60; display: flex; align-items: center; gap: 8px; box-shadow: 0 8px 30px rgba(44,41,35,.2); border-radius: 7px; font-size: 12px; }

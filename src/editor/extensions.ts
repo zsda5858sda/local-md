@@ -1,8 +1,53 @@
 import { Extension, mergeAttributes, Node } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
+import Link from "@tiptap/extension-link";
 import { t } from "../i18n";
 
 type SafeImageAttributes = Record<string, unknown>;
+
+export const INSERT_LINK_REQUESTED_EVENT = "local-md:insert-link-requested";
+
+export function linkHrefFromTarget(target: EventTarget | null): string | null {
+  const element = target instanceof Element
+    ? target
+    : target instanceof globalThis.Node ? target.parentElement : null;
+  return element?.closest<HTMLAnchorElement>("a[href]")?.getAttribute("href") ?? null;
+}
+
+export function externalHttpLinkFromTarget(target: EventTarget | null): string | null {
+  const href = linkHrefFromTarget(target);
+  return href && /^https?:\/\//i.test(href) ? href : null;
+}
+
+export function handleEditorLinkClick(event: MouseEvent, onExternalLink: (href: string) => void): boolean {
+  if (linkHrefFromTarget(event.target) === null) return false;
+  event.preventDefault();
+  if (!event.ctrlKey && !event.metaKey) return false;
+  const href = externalHttpLinkFromTarget(event.target);
+  if (!href) return false;
+  onExternalLink(href);
+  return true;
+}
+
+export const AnnotatedLink = Link.extend({
+  renderHTML({ HTMLAttributes }) {
+    return ["a", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
+      title: HTMLAttributes.title || HTMLAttributes.href,
+    }), 0];
+  },
+});
+
+export const LinkShortcut = Extension.create({
+  name: "linkShortcut",
+  addKeyboardShortcuts() {
+    return {
+      "Mod-k": () => {
+        this.editor.view.dom.dispatchEvent(new Event(INSERT_LINK_REQUESTED_EVENT));
+        return true;
+      },
+    };
+  },
+});
 
 export function isRemoteImageSource(value: string): boolean {
   return /^https?:\/\//i.test(value);

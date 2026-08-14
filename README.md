@@ -75,6 +75,8 @@ Regex 模式支援 JavaScript 正規表示式與捕獲群組，例如搜尋 `ite
 | `Ctrl/Cmd + W` | 關閉目前文件分頁 |
 | `Ctrl/Cmd + F` | 開啟搜尋並聚焦搜尋欄 |
 | `Ctrl/Cmd + H` | 開啟搜尋並聚焦取代欄 |
+| `Ctrl/Cmd + K` | 為選取文字插入或編輯連結 |
+| `Ctrl/Cmd + 點擊連結` | 顯示安全確認後，以系統預設瀏覽器開啟 HTTP(S) 外部連結 |
 | `Ctrl/Cmd + B` | 粗體 |
 | `Ctrl/Cmd + I` | 斜體 |
 | `Ctrl/Cmd + U` | 底線 |
@@ -168,9 +170,9 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 ```
 
-目前驗證結果：TypeScript typecheck、65 個前端測試、14 個 Rust 測試及 Tauri release／Windows 安裝包建置均通過。
+目前驗證結果：TypeScript typecheck、69 個前端測試、14 個 Rust 測試及 Tauri release／Windows 安裝包建置均通過。
 
-測試涵蓋 canonical semantic round-trip、Soft / Hard Break、多層與 loose / tight list、自訂 ordered-list start、task list、CJK / emoji table、code fence、YAML / TOML front-matter、reference-link compatibility、危險 HTML 隔離、property-based 生成案例、encoding、link rewrite、raw-source 搜尋定位、搜尋取代、分頁排序、自動儲存 revision 與快捷鍵白名單。
+測試涵蓋 canonical semantic round-trip、Soft / Hard Break、多層與 loose / tight list、自訂 ordered-list start、task list、CJK / emoji table、code fence、YAML / TOML front-matter、reference-link compatibility、危險 HTML 隔離、property-based 生成案例、encoding、link rewrite、外部連結協定限制、raw-source 搜尋定位、搜尋取代、分頁排序、自動儲存 revision 與快捷鍵白名單。
 
 ## 資料安全邊界
 

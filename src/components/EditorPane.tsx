@@ -1,7 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import Link from "@tiptap/extension-link";
 import Underline from "@tiptap/extension-underline";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
@@ -9,8 +8,8 @@ import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 import type { OpenDocument, TiptapNode } from "../domain/types";
-import { MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
-import { loadWorkspaceAsset } from "../services/desktop";
+import { AnnotatedLink, handleEditorLinkClick, LinkShortcut, MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
+import { loadWorkspaceAsset, openExternalLink } from "../services/desktop";
 import { sanitizeHtml } from "../services/htmlSanitizer";
 import { Toolbar } from "./Toolbar";
 import { TableControls } from "./TableControls";
@@ -48,11 +47,17 @@ function hasLocalImage(node: TiptapNode): boolean {
 
 export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, targetText, targetNonce }: EditorPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [pendingLink, setPendingLink] = useState<string | null>(null);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false, link: false, underline: false }),
       CodeBlockLowlight.configure({ lowlight }),
-      Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { rel: "noopener noreferrer" } }),
+      AnnotatedLink.configure({
+        openOnClick: false,
+        autolink: true,
+        HTMLAttributes: { rel: "noopener noreferrer", target: null },
+      }),
+      LinkShortcut,
       Underline,
       SafeImage.configure({ inline: true, allowBase64: false }),
       TaskList,
@@ -67,6 +72,9 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
     content: document.parsed.doc,
     editorProps: {
       attributes: { class: "prose-editor", "aria-label": t("editor.aria", { title: document.title }), spellcheck: "true" },
+      handleDOMEvents: {
+        click: (_view, event) => handleEditorLinkClick(event, setPendingLink),
+      },
       handlePaste: (view, event) => {
         const html = event.clipboardData?.getData("text/html") ?? "";
         if (!html) return false;
@@ -140,6 +148,18 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
         <EditorContent editor={editor} />
         <TableControls editor={editor} containerRef={scrollRef} />
       </div>
+      {pendingLink && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPendingLink(null); }}>
+          <div className="entry-dialog" role="alertdialog" aria-modal="true" aria-labelledby="external-link-title" onKeyDown={(event) => { if (event.key === "Escape") setPendingLink(null); }}>
+            <h2 id="external-link-title">{t("link.externalWarningTitle")}</h2>
+            <p className="external-link-warning">{t("link.externalWarningBody", { url: pendingLink })}</p>
+            <div>
+              <button type="button" className="secondary-button" onClick={() => setPendingLink(null)}>{t("common.cancel")}</button>
+              <button type="button" className="primary-button" autoFocus onClick={() => { void openExternalLink(pendingLink); setPendingLink(null); }}>{t("link.openInBrowser")}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

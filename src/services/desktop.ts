@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { save } from "@tauri-apps/plugin-dialog";
+import { open as openExternalUrl } from "@tauri-apps/plugin-shell";
 import type { DiskDocument, FileFormatProfile, WorkspaceEntry, WorkspaceSettings } from "../domain/types";
 import { DEFAULT_WORKSPACE_SETTINGS } from "../domain/types";
 import { parseMarkdown, serializeMarkdown } from "../markdown/pipeline";
@@ -10,6 +11,15 @@ import { t } from "../i18n";
 const UTF8_LF: FileFormatProfile = { encoding: "utf-8", bom: "none", eol: "lf" };
 
 export const isTauri = (): boolean => Boolean(window.__TAURI_INTERNALS__);
+
+export async function openExternalLink(url: string): Promise<void> {
+  if (!/^https?:\/\//i.test(url)) throw new TypeError("Only HTTP(S) external links can be opened");
+  if (!isTauri()) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  await openExternalUrl(url);
+}
 
 const demoFiles = new Map<string, string>([
   ["歡迎.md", `---\ntitle: 歡迎使用 Local MD\ntags: [local-first, markdown]\n---\n# 歡迎使用 Local MD\n\n這是一個**本機優先**、以 Markdown 為唯一事實來源的區塊式編輯器。\n\n- [x] 純文字、完全可攜\n- [x] 可靠的 canonical 儲存\n- [ ] 選擇資料夾開始工作\n\n> 瀏覽器模式使用記憶體示範工作區；Tauri 桌面版可直接操作本機檔案。\n\n| 原則 | 狀態 |\n| :--- | :---: |\n| Markdown 不被破壞 | ✅ |\n| 預設離線 | ✅ |\n`],

@@ -4,10 +4,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { generateHTML } from "@tiptap/core";
+import StarterKit from "@tiptap/starter-kit";
 import { parseMarkdown, semanticRoundTrip, serializeMarkdown } from "../src/markdown/pipeline";
 import { containsUnsafeHtml, sanitizeHtml } from "../src/services/htmlSanitizer";
 import { NODE_REGISTRY, isRegisteredTiptapNode, isSupportedMdastNode } from "../src/markdown/nodeRegistry";
-import { createSafeImageNodeView } from "../src/editor/extensions";
+import { AnnotatedLink, createSafeImageNodeView, externalHttpLinkFromTarget, linkHrefFromTarget } from "../src/editor/extensions";
 import type { TiptapNode } from "../src/domain/types";
 
 const fixture = (name: string) => readFileSync(resolve(process.cwd(), "tests", "fixtures", name), "utf8");
@@ -147,6 +149,28 @@ describe("canonical Markdown round-trip", () => {
     expect(view.dom.querySelector("img")?.getAttribute("src")).toBe("https://tracker.example/pixel.png");
     view.destroy();
   });
+
+  it("renders link destinations as native hover titles", () => {
+    const html = generateHTML({
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [{ type: "text", text: "Example", marks: [{ type: "link", attrs: { href: "https://example.com/docs" } }] }],
+      }],
+    }, [StarterKit.configure({ link: false }), AnnotatedLink]);
+    expect(html).toContain('href="https://example.com/docs"');
+    expect(html).toContain('title="https://example.com/docs"');
+  });
+
+  it("allows modifier-click navigation only for HTTP(S) links", () => {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = '<a href="https://example.com/docs"><span>Web</span></a><a href="notes/local.md"><span>Local</span></a>';
+    expect(linkHrefFromTarget(wrapper.querySelector("span"))).toBe("https://example.com/docs");
+    expect(linkHrefFromTarget(wrapper.querySelectorAll("span")[1])).toBe("notes/local.md");
+    expect(externalHttpLinkFromTarget(wrapper.querySelector("span"))).toBe("https://example.com/docs");
+    expect(externalHttpLinkFromTarget(wrapper.querySelectorAll("span")[1])).toBeNull();
+  });
+
 });
 
 describe("property-based supported subset", () => {
