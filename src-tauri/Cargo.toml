@@ -1,6 +1,6 @@
 [package]
 name = "local-md"
-version = "0.1.0"
+version = "1.1.1-a"
 description = "A local-first block-based Markdown editor"
 authors = ["Local MD contributors"]
 edition = "2021"

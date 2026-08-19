@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { OpenDocument, WorkspaceSettings } from "../domain/types";
 import { t } from "../i18n";
 
-export const TAB_GROUP_COLORS = ["#6b7280", "#5b8def", "#ef7d72", "#eabf3b", "#70bf8b", "#e879b0", "#b46de0", "#56c4d8", "#f0a15f"];
+export const TAB_GROUP_COLORS = ["#000000", "#4D4D4D", "#808080", "#B3B3B3", "#FF3B30"];
 export type TabDropTarget = { type: "tab"; id: string; position: "before" | "after" } | { type: "group"; groupId: string | null } | null;
 export type GroupMenu = { id: string; left: number; top: number; draftName: string } | null;
 
@@ -34,7 +34,7 @@ export function useTabGroups(
     while (used.has(t("tabs.numberedGroup", { number }))) number += 1;
     return {
       ...current,
-      ui: { ...current.ui, tabGroups: [...current.ui.tabGroups, { id: crypto.randomUUID(), name: t("tabs.numberedGroup", { number }), color: TAB_GROUP_COLORS[1], collapsed: false }] },
+      ui: { ...current.ui, tabGroups: [...current.ui.tabGroups, { id: crypto.randomUUID(), name: t("tabs.numberedGroup", { number }), color: TAB_GROUP_COLORS[4], collapsed: false }] },
     };
   });
 
