@@ -157,7 +157,7 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
   if (document.parsed.mode === "compatibility") {
     return (
       <div className="source-mode">
-        <Toolbar editor={null} documentZoom={documentZoom} onZoomOut={onZoomOut} onZoomReset={onZoomReset} onZoomIn={onZoomIn} />
+        <Toolbar editor={null} workspaceRoot={workspaceRoot} documentRelativePath={document.relativePath} documentZoom={documentZoom} onZoomOut={onZoomOut} onZoomReset={onZoomReset} onZoomIn={onZoomIn} />
         <div className="compatibility-banner" role="alert">
           <strong>{t("editor.compatibilityTitle")}</strong>
           <span>{t("editor.compatibilityDescription")}</span>
