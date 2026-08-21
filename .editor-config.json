@@ -1,0 +1,28 @@
+{
+  "settings": {
+    "autoSaveDebounceMs": 1500,
+    "autoSaveEnabled": true,
+    "exportMode": "strict",
+    "lineBreakMode": "soft",
+    "openFolderFileFormatPolicy": "preserve",
+    "softBreakSerialization": "space"
+  },
+  "ui": {
+    "expandedFolders": [
+      "dist",
+      "dist/assets",
+      "tests",
+      "tests/fixtures"
+    ],
+    "lastOpenedFile": "tests/fixtures/code-block.md",
+    "openTabs": [
+      "tests/fixtures/code-block.md"
+    ],
+    "propertiesWidth": 288,
+    "sidebarWidth": 276,
+    "tabAssignments": {},
+    "tabGroups": []
+  },
+  "version": 1,
+  "workspaceName": "local-md"
+}
