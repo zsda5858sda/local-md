@@ -1,6 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#1f7357"/>
-  <path d="M133 104h157l89 89v215H133z" fill="#fbfaf7"/>
-  <path d="M290 104v89h89" fill="#cfe3d8"/>
-  <path d="M190 251h132M190 302h132M190 353h84" fill="none" stroke="#1f7357" stroke-width="23" stroke-linecap="round"/>
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="#161616"/>
+  <rect x="11" y="11" width="490" height="490" rx="109" fill="none" stroke="#484848" stroke-width="6"/>
+
+  <rect x="112" y="72" width="288" height="368" fill="#FBFBFA"/>
+  <rect x="112" y="72" width="288" height="368" fill="none" stroke="#000000" stroke-width="5"/>
+
+  <rect x="148" y="108" width="42" height="9" fill="#FF3B30"/>
+  <rect x="148" y="137" width="216" height="9" fill="#000000"/>
+
+  <text x="144" y="252" fill="#000000" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="112" font-weight="800" letter-spacing="-9">MD</text>
+
+  <rect x="148" y="288" width="176" height="8" fill="#000000"/>
+  <rect x="148" y="318" width="216" height="8" fill="#000000"/>
+  <rect x="148" y="348" width="150" height="8" fill="#000000"/>
+  <rect x="148" y="398" width="74" height="9" fill="#FF3B30"/>
 </svg>

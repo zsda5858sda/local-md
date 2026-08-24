@@ -1,7 +1,7 @@
 {
   "name": "local-md",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.1.1-a",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -32,6 +32,7 @@
     "fast-check": "^4.0.0",
     "fflate": "^0.8.2",
     "iconv-lite": "^0.7.0",
+    "katex": "^0.18.4",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.468.0",
     "minisearch": "^7.1.0",

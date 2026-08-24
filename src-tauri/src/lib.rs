@@ -506,7 +506,7 @@ fn default_settings(root: &Path) -> serde_json::Value {
             "exportMode": "strict",
             "openFolderFileFormatPolicy": "preserve"
         },
-        "ui": { "expandedFolders": [], "lastOpenedFile": null, "openTabs": [], "sidebarWidth": panel_limits.sidebar.default, "propertiesWidth": panel_limits.properties.default, "tabGroups": [], "tabAssignments": {} }
+        "ui": { "expandedFolders": [], "lastOpenedFile": null, "openTabs": [], "sidebarWidth": panel_limits.sidebar.default, "propertiesWidth": panel_limits.properties.default, "documentZoom": 100, "theme": "light", "tabGroups": [], "tabAssignments": {} }
     })
 }
 
@@ -544,14 +544,20 @@ fn normalize_settings(root: &Path, value: &serde_json::Value) -> (serde_json::Va
         if let Some(value) = ui.get("propertiesWidth").and_then(|item| item.as_u64()).filter(|item| (panel_limits.properties.minimum..=panel_limits.properties.maximum).contains(item)) {
             normalized["ui"]["propertiesWidth"] = value.into();
         }
+        if let Some(value) = ui.get("documentZoom").and_then(|item| item.as_u64()).filter(|item| (70..=160).contains(item)) {
+            normalized["ui"]["documentZoom"] = value.into();
+        }
+        if let Some(value) = ui.get("theme").and_then(|item| item.as_str()).filter(|item| matches!(*item, "light" | "dark")) {
+            normalized["ui"]["theme"] = value.into();
+        }
         if let Some(groups) = ui.get("tabGroups").and_then(|item| item.as_array()) {
             let groups: Vec<serde_json::Value> = groups.iter().take(50).filter_map(|group| {
                 let id = group.get("id")?.as_str()?.trim();
                 let name = group.get("name")?.as_str()?.trim();
                 if id.is_empty() || name.is_empty() || id.len() > 100 || name.len() > 100 { return None; }
                 let color = group.get("color").and_then(|item| item.as_str()).filter(|value| matches!(*value,
-                    "#6b7280" | "#5b8def" | "#ef7d72" | "#eabf3b" | "#70bf8b" | "#e879b0" | "#b46de0" | "#56c4d8" | "#f0a15f"
-                )).unwrap_or("#6b7280");
+                    "#000000" | "#4D4D4D" | "#808080" | "#B3B3B3" | "#FF3B30"
+                )).unwrap_or("#FF3B30");
                 Some(serde_json::json!({ "id": id, "name": name, "color": color, "collapsed": group.get("collapsed").and_then(|item| item.as_bool()).unwrap_or(false) }))
             }).collect();
             normalized["ui"]["tabGroups"] = groups.into();
@@ -964,6 +970,22 @@ mod tests {
     }
 
     #[test]
+    fn moves_markdown_file_into_workspace_folder() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("note.md"), b"# Note\n").unwrap();
+        fs::create_dir(directory.path().join("archive")).unwrap();
+
+        rename_entry(
+            directory.path().to_string_lossy().into_owned(),
+            "note.md".into(),
+            "archive/note.md".into(),
+        ).unwrap();
+
+        assert!(!directory.path().join("note.md").exists());
+        assert_eq!(fs::read(directory.path().join("archive/note.md")).unwrap(), b"# Note\n");
+    }
+
+    #[test]
     fn normalizes_incomplete_settings() {
         let directory = tempfile::tempdir().unwrap();
         let (settings, changed) = normalize_settings(directory.path(), &serde_json::json!({}));
@@ -974,6 +996,8 @@ mod tests {
         let limits = panel_limits();
         assert_eq!(settings["ui"]["sidebarWidth"], limits.sidebar.default);
         assert_eq!(settings["ui"]["propertiesWidth"], limits.properties.default);
+        assert_eq!(settings["ui"]["documentZoom"], 100);
+        assert_eq!(settings["ui"]["theme"], "light");
         assert!(settings["ui"]["tabGroups"].is_array());
         assert!(settings["ui"]["tabAssignments"].is_object());
     }

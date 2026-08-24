@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
@@ -17,8 +17,14 @@ import { Toolbar } from "./Toolbar";
 import { TableControls } from "./TableControls";
 import { OutlineOverlay } from "./OutlineOverlay";
 import { t } from "../i18n";
+import { CodeBlockView } from "./CodeBlockView";
 
 const lowlight = createLowlight(common);
+const CodeBlockWithControls = CodeBlockLowlight.extend({
+  addNodeView() {
+    return ReactNodeViewRenderer(CodeBlockView, { contentDOMElementTag: "code" });
+  },
+});
 
 interface EditorPaneProps {
   document: OpenDocument;
@@ -34,6 +40,10 @@ interface EditorPaneProps {
     activeSectionIndex: number;
     onSelect: (index: number) => void;
   };
+  documentZoom: number;
+  onZoomOut: () => void;
+  onZoomReset: () => void;
+  onZoomIn: () => void;
 }
 
 async function hydrateImages(node: TiptapNode, workspaceRoot: string, documentRelativePath: string): Promise<TiptapNode> {
@@ -55,14 +65,14 @@ function hasLocalImage(node: TiptapNode): boolean {
   return node.content?.some(hasLocalImage) ?? false;
 }
 
-export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, targetText, targetNonce, onReady, outline }: EditorPaneProps) {
+export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, targetText, targetNonce, documentZoom, onZoomOut, onZoomReset, onZoomIn, onReady, outline }: EditorPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pendingLink, setPendingLink] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<{ src: string; alt: string } | null>(null);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false, link: false, underline: false }),
-      CodeBlockLowlight.configure({ lowlight }),
+      CodeBlockWithControls.configure({ lowlight }),
       AnnotatedLink.configure({
         openOnClick: false,
         autolink: true,
@@ -166,6 +176,7 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
   if (document.parsed.mode === "compatibility") {
     return (
       <div className="source-mode">
+        <Toolbar editor={null} workspaceRoot={workspaceRoot} documentRelativePath={document.relativePath} documentZoom={documentZoom} onZoomOut={onZoomOut} onZoomReset={onZoomReset} onZoomIn={onZoomIn} />
         <div className="compatibility-banner" role="alert">
           <strong>{t("editor.compatibilityTitle")}</strong>
           <span>{t("editor.compatibilityDescription")}</span>
@@ -177,7 +188,15 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
 
   return (
     <div className="editor-pane">
-      <Toolbar editor={editor} workspaceRoot={workspaceRoot} documentRelativePath={document.relativePath} />
+      <Toolbar
+        editor={editor}
+        workspaceRoot={workspaceRoot}
+        documentRelativePath={document.relativePath}
+        documentZoom={documentZoom}
+        onZoomOut={onZoomOut}
+        onZoomReset={onZoomReset}
+        onZoomIn={onZoomIn}
+      />
       {document.parsed.issues.length > 0 && (
         <details className="issue-banner">
           <summary>{t("editor.compatibilityIssues", { count: document.parsed.issues.length })}</summary>

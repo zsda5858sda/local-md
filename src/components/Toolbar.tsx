@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
+import { createPortal } from "react-dom";
 import {
   Bold, Braces, Code2, Heading1, Heading2, Image, Italic, Link2, List,
-  ListChecks, ListOrdered, Minus, Quote, Redo2, Strikethrough, Table2,
+  ListChecks, ListOrdered, Minus, Plus, Quote, Redo2, Strikethrough, Table2,
   Underline as UnderlineIcon, Undo2,
 } from "lucide-react";
 import { t } from "../i18n";
@@ -13,6 +14,10 @@ interface ToolbarProps {
   editor: Editor | null;
   workspaceRoot: string;
   documentRelativePath: string;
+  documentZoom: number;
+  onZoomOut: () => void;
+  onZoomReset: () => void;
+  onZoomIn: () => void;
 }
 
 type InputDialog = { kind: "link" | "image"; value: string; imageTab?: "upload" | "url" };
@@ -24,6 +29,14 @@ function shortcutText(shortcut?: string): string | undefined {
   return shortcut ? `${modifierKeyLabel}+${shortcut}` : undefined;
 }
 
+function ZoomControl({ documentZoom, onZoomOut, onZoomReset, onZoomIn }: Pick<ToolbarProps, "documentZoom" | "onZoomOut" | "onZoomReset" | "onZoomIn">) {
+  return <div className="toolbar-zoom" aria-label="頁面文字大小">
+    <button type="button" aria-label="縮小頁面文字" title="縮小文字" disabled={documentZoom <= 70} onMouseDown={(event) => { event.preventDefault(); onZoomOut(); }}><Minus /></button>
+    <button type="button" className="toolbar-zoom-value" aria-label="重設頁面文字為 100%" title="重設為 100%" onMouseDown={(event) => { event.preventDefault(); onZoomReset(); }}>{documentZoom}%</button>
+    <button type="button" aria-label="放大頁面文字" title="放大文字" disabled={documentZoom >= 160} onMouseDown={(event) => { event.preventDefault(); onZoomIn(); }}><Plus /></button>
+  </div>;
+}
+
 function ToolbarButton({ label, shortcut, active, disabled, onClick, children }: {
   label: string;
   shortcut?: string;
@@ -32,24 +45,28 @@ function ToolbarButton({ label, shortcut, active, disabled, onClick, children }:
   onClick: () => void;
   children: React.ReactNode;
 }) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [tooltip, setTooltip] = useState<{ left: number; top: number } | null>(null);
   const shortcutLabel = shortcutText(shortcut);
   const fullLabel = shortcutLabel ? `${label} (${shortcutLabel})` : label;
+  const showTooltip = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) setTooltip({ left: rect.left + rect.width / 2, top: rect.bottom + 7 });
+  };
   return (
-    <button
-      type="button"
-      className={active ? "tool-button active" : "tool-button"}
-      aria-label={fullLabel}
-      title={fullLabel}
-      data-tooltip={fullLabel}
-      disabled={disabled}
-      onMouseDown={(event) => { event.preventDefault(); onClick(); }}
-    >
-      {children}
-    </button>
+    <>
+      <button ref={buttonRef} type="button" className={active ? "tool-button active" : "tool-button"} aria-label={fullLabel} title={fullLabel} disabled={disabled}
+        onMouseEnter={showTooltip} onMouseLeave={() => setTooltip(null)} onFocus={showTooltip} onBlur={() => setTooltip(null)}
+        onMouseDown={(event) => { event.preventDefault(); setTooltip(null); onClick(); }}>
+        {children}
+      </button>
+      {tooltip && createPortal(<div className="tool-tooltip" role="tooltip" style={{ left: tooltip.left, top: tooltip.top }}><span>{label}</span>{shortcutLabel && <kbd>{shortcutLabel}</kbd>}</div>, document.body)}
+    </>
   );
 }
 
-export function Toolbar({ editor, workspaceRoot, documentRelativePath }: ToolbarProps) {
+export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZoom, onZoomOut, onZoomReset, onZoomIn }: ToolbarProps) {
+  const zoomControl = <ZoomControl documentZoom={documentZoom} onZoomOut={onZoomOut} onZoomReset={onZoomReset} onZoomIn={onZoomIn} />;
   const [dialog, setDialog] = useState<InputDialog | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -94,8 +111,9 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath }: Toolbar
     }
   }, [documentRelativePath, editor, workspaceRoot]);
 
-  if (!editor) return <div className="toolbar" aria-label={t("toolbar.aria")} />;
+  if (!editor) return <div className="toolbar" aria-label={t("toolbar.aria")}><div className="toolbar-controls" />{zoomControl}</div>;
   const command = () => editor.chain().focus();
+  const codeBlockActive = editor.isActive("codeBlock");
 
   const submitLinkDialog = () => {
     if (!dialog) return;
@@ -113,6 +131,7 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath }: Toolbar
   };
   return (
     <div className="toolbar" role="toolbar" aria-label={t("toolbar.aria")}>
+      <div className="toolbar-controls">
       <div className="tool-group">
         <ToolbarButton label={t("toolbar.undo")} shortcut="Z" disabled={!editor.can().undo()} onClick={() => command().undo().run()}><Undo2 /></ToolbarButton>
         <ToolbarButton label={t("toolbar.redo")} shortcut="Shift+Z" disabled={!editor.can().redo()} onClick={() => command().redo().run()}><Redo2 /></ToolbarButton>
@@ -133,7 +152,7 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath }: Toolbar
         <ToolbarButton label={t("toolbar.orderedList")} active={editor.isActive("orderedList")} onClick={() => command().toggleOrderedList().run()}><ListOrdered /></ToolbarButton>
         <ToolbarButton label={t("toolbar.taskList")} active={editor.isActive("taskList")} onClick={() => command().toggleTaskList().run()}><ListChecks /></ToolbarButton>
         <ToolbarButton label={t("toolbar.blockquote")} active={editor.isActive("blockquote")} onClick={() => command().toggleBlockquote().run()}><Quote /></ToolbarButton>
-        <ToolbarButton label={t("toolbar.codeBlock")} active={editor.isActive("codeBlock")} onClick={() => command().toggleCodeBlock().run()}><Code2 /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.codeBlock")} active={codeBlockActive} onClick={() => command().toggleCodeBlock({ language: "python" }).run()}><Code2 /></ToolbarButton>
         <ToolbarButton label={t("toolbar.horizontalRule")} onClick={() => command().setHorizontalRule().run()}><Minus /></ToolbarButton>
       </div>
       <div className="tool-separator" />
@@ -141,6 +160,7 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath }: Toolbar
         <ToolbarButton label={t("toolbar.insertLink")} shortcut="K" active={editor.isActive("link")} onClick={addLink}><Link2 /></ToolbarButton>
         <ToolbarButton label={t("toolbar.insertImage")} onClick={() => { setImportError(null); setDialog({ kind: "image", value: "https://", imageTab: "upload" }); }}><Image /></ToolbarButton>
         <ToolbarButton label={t("toolbar.insertTable")} onClick={() => command().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table2 /></ToolbarButton>
+      </div>
       </div>
       {dialog?.kind === "link" && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDialog(null); }}>
@@ -191,6 +211,7 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath }: Toolbar
           </div>
         </div>
       )}
+      {zoomControl}
     </div>
   );
 }

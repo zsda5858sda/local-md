@@ -108,6 +108,8 @@ export interface WorkspaceSettings {
     openTabs: string[];
     sidebarWidth: number;
     propertiesWidth: number;
+    documentZoom: number;
+    theme: "light" | "dark";
     tabGroups: Array<{ id: string; name: string; color: string; collapsed: boolean }>;
     tabAssignments: Record<string, string>;
   };
@@ -126,5 +128,5 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
     exportMode: "strict",
     openFolderFileFormatPolicy: "preserve",
   },
-  ui: { expandedFolders: [], lastOpenedFile: null, openTabs: [], sidebarWidth: panelLimits.sidebar.default, propertiesWidth: panelLimits.properties.default, tabGroups: [], tabAssignments: {} },
+  ui: { expandedFolders: [], lastOpenedFile: null, openTabs: [], sidebarWidth: panelLimits.sidebar.default, propertiesWidth: panelLimits.properties.default, documentZoom: 100, theme: "light", tabGroups: [], tabAssignments: {} },
 };

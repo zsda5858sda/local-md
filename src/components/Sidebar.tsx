@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import type { DragEvent as ReactDragEvent } from "react";
 import {
-  ChevronDown, ChevronRight, FilePlus2, FileText, Folder, FolderOpen,
+  ChevronDown, ChevronRight, FilePlus2, FileText, Folder, FolderInput, FolderOpen,
   FolderPlus, MoreHorizontal, PanelLeftClose, RefreshCw, Search,
 } from "lucide-react";
 import type { SearchHit, WorkspaceEntry } from "../domain/types";
@@ -34,7 +35,15 @@ interface SidebarProps {
   onSelectFolder: (path: string) => void;
   onToggleFolder: (path: string) => void;
   onRefresh: () => void;
+  onOpenWorkspace: () => void;
   onCreate: (kind: "file" | "directory") => void;
+  onMove: (entry: WorkspaceEntry) => void;
+  draggedFilePath: string | null;
+  fileDropTarget: string | null;
+  onFileDragStart: (entry: WorkspaceEntry) => void;
+  onFileDragEnd: () => void;
+  onFileDragOver: (destination: string | null) => void;
+  onFileDrop: (destination: string) => void;
   onRename: (entry: WorkspaceEntry) => void;
   onDelete: (entry: WorkspaceEntry) => void;
   onCollapse: () => void;
@@ -45,10 +54,17 @@ function TreeItem({ entry, depth, props }: { entry: WorkspaceEntry; depth: numbe
   const isFolder = entry.kind === "directory";
   const expanded = props.expandedFolders.includes(entry.relativePath);
   const active = isFolder ? props.selectedFolder === entry.relativePath : props.activePath === entry.relativePath;
+  const validDropTarget = isFolder && props.draggedFilePath !== null && props.draggedFilePath.split("/").slice(0, -1).join("/") !== entry.relativePath;
+  const onFolderDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!validDropTarget) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    props.onFileDragOver(entry.relativePath);
+  };
   return (
     <li>
-      <div className={`tree-row ${active ? "active" : ""}`} style={{ paddingInlineStart: `${10 + depth * 16}px` }}>
-        <button className="tree-main" type="button" aria-expanded={isFolder ? expanded : undefined} onClick={() => {
+      <div className={`tree-row ${active ? "active" : ""}${props.fileDropTarget === entry.relativePath ? " file-drop-target" : ""}`} style={{ paddingInlineStart: `${10 + depth * 16}px` }} onDragOver={onFolderDragOver} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null) && props.fileDropTarget === entry.relativePath) props.onFileDragOver(null); }} onDrop={(event) => { if (!validDropTarget) return; event.preventDefault(); props.onFileDrop(entry.relativePath); }}>
+        <button className="tree-main" type="button" draggable={!isFolder} aria-expanded={isFolder ? expanded : undefined} onDragStart={(event) => { if (isFolder) return; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", entry.relativePath); props.onFileDragStart(entry); }} onDragEnd={props.onFileDragEnd} onClick={() => {
           if (isFolder) {
             props.onSelectFolder(entry.relativePath);
             props.onToggleFolder(entry.relativePath);
@@ -65,6 +81,7 @@ function TreeItem({ entry, depth, props }: { entry: WorkspaceEntry; depth: numbe
         <button className="tree-more" aria-label={t("sidebar.entryMenu", { name: entry.name })} aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}><MoreHorizontal /></button>
         {menuOpen && (
           <div className="tree-context-menu" role="menu">
+            {!isFolder && <button role="menuitem" onClick={() => { setMenuOpen(false); props.onMove(entry); }}><FolderInput />移動到資料夾</button>}
             <button role="menuitem" onClick={() => { setMenuOpen(false); props.onRename(entry); }}>{t("common.rename")}</button>
             <button role="menuitem" className="danger" onClick={() => { setMenuOpen(false); props.onDelete(entry); }}>{t("sidebar.trash")}</button>
           </div>
@@ -99,8 +116,10 @@ export function Sidebar(props: SidebarProps) {
   return (
     <aside className="sidebar" style={{ flexBasis: `${props.width}px` }}>
       <header className="sidebar-header">
-        <div className="workspace-mark">L</div>
-        <strong title={props.workspaceName}>{props.workspaceName}</strong>
+        <button className="workspace-root-button" type="button" aria-label="開啟或切換工作區" data-tooltip="開啟或切換工作區" onClick={props.onOpenWorkspace}>
+          <Folder className="workspace-mark" aria-hidden="true" />
+          <strong>{props.workspaceName}</strong>
+        </button>
         <button className="icon-button" aria-label={t("sidebar.collapse")} onClick={props.onCollapse}><PanelLeftClose /></button>
       </header>
       <div className="sidebar-actions">
@@ -127,14 +146,14 @@ export function Sidebar(props: SidebarProps) {
           </ul>
         </div>
       )}
-      <div className="tree-heading">
+      <div className={`tree-heading${props.fileDropTarget === "" && props.draggedFilePath !== null ? " file-drop-target" : ""}`} onDragOver={(event) => { if (props.draggedFilePath === null || !props.draggedFilePath.includes("/")) return; event.preventDefault(); event.dataTransfer.dropEffect = "move"; props.onFileDragOver(""); }} onDrop={(event) => { if (props.draggedFilePath === null || !props.draggedFilePath.includes("/")) return; event.preventDefault(); props.onFileDrop(""); }}>
         <button className="tree-root" title={t("sidebar.rootTitle")} onClick={() => props.onSelectFolder("")}>{props.selectedFolder ? t("sidebar.folderPath", { path: props.selectedFolder }) : t("sidebar.rootPath")}</button>
         <div>
           <button aria-label={t("sidebar.newMarkdown")} title={t("sidebar.newMarkdown")} onClick={() => props.onCreate("file")}><FilePlus2 /></button>
           <button aria-label={t("sidebar.newFolder")} title={t("sidebar.newFolder")} onClick={() => props.onCreate("directory")}><FolderPlus /></button>
         </div>
       </div>
-      <nav className="tree" aria-label={t("sidebar.workspaceFiles")}><ul>{props.entries.map((entry) => <TreeItem key={entry.relativePath} entry={entry} depth={0} props={props} />)}</ul></nav>
+      <nav className="tree" aria-label={t("sidebar.workspaceFiles")} onClick={(event) => { if (!(event.target instanceof Element) || !event.target.closest(".tree-row")) props.onSelectFolder(""); }}><ul>{props.entries.map((entry) => <TreeItem key={entry.relativePath} entry={entry} depth={0} props={props} />)}</ul></nav>
       <footer className="sidebar-footer"><span className="status-dot" />{t("sidebar.offline")}</footer>
     </aside>
   );
