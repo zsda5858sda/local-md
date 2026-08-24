@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { Editor } from "@tiptap/react";
 import {
   AlertTriangle, BookOpen, Braces, Check, ChevronDown, ChevronRight, FileText, Menu,
   MoreHorizontal, PanelRightOpen, Save, Settings, Trash2, Unlink, X,
@@ -22,6 +23,7 @@ import { PropertiesPanel } from "./components/PropertiesPanel";
 import { Sidebar, type SearchProps } from "./components/Sidebar";
 import { documentSaveContent, leafName, openDocument, useDocumentPersistence, useDocuments } from "./hooks/useDocuments";
 import { useSaveConflict } from "./hooks/useSaveConflict";
+import { useOutline } from "./hooks/useOutline";
 import { useWorkspace, useWorkspaceWatcher } from "./hooks/useWorkspace";
 import { useWorkspaceSearch } from "./hooks/useWorkspaceSearch";
 import { TAB_GROUP_COLORS, useTabGroups, type TabDropTarget } from "./hooks/useTabGroups";
@@ -60,6 +62,8 @@ export default function App() {
   const saveConflict = useSaveConflict(dispatch);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
+  const [editorInfo, setEditorInfo] = useState<{ editor: Editor; scrollElement: HTMLDivElement } | null>(null);
+  const outline = useOutline(editorInfo?.editor ?? null, editorInfo?.scrollElement ?? null);
   const {
     searchQuery, setSearchQuery, replacementText, setReplacementText, searchScope,
     searchRegex, searchError, setSearchError, searchHits, setSearchHits,
@@ -722,7 +726,7 @@ export default function App() {
           </div>
         </div>
         <section className="document-area">
-          {activeDocument ? <EditorPane key={activeDocument.id} document={activeDocument} workspaceRoot={workspaceRoot} targetText={searchTarget?.path === activeDocument.relativePath ? searchTarget.text : undefined} targetNonce={searchTarget?.nonce} onChange={updateVisualDocument} onSourceChange={updateSourceDocument} /> : <div className="empty-document"><FileText /><h2>{t("empty.title")}</h2><p>{t("empty.description")}</p></div>}
+          {activeDocument ? <EditorPane key={activeDocument.id} document={activeDocument} workspaceRoot={workspaceRoot} targetText={searchTarget?.path === activeDocument.relativePath ? searchTarget.text : undefined} targetNonce={searchTarget?.nonce} onChange={updateVisualDocument} onSourceChange={updateSourceDocument} onReady={setEditorInfo} outline={{ items: outline.items, activeIndex: outline.activeIndex, activeSectionIndex: outline.activeSectionIndex, onSelect: outline.goToHeading }} /> : <div className="empty-document"><FileText /><h2>{t("empty.title")}</h2><p>{t("empty.description")}</p></div>}
           {activeDocument?.conflict && <div className="conflict-bar" role="alert"><AlertTriangle /><span>{activeDocument.conflict.diskHash === "deleted" ? t("conflict.deleted") : t("conflict.changed")}</span><button onClick={() => void reloadFromDisk(activeDocument.id)} disabled={activeDocument.conflict.diskHash === "deleted"}>{t("conflict.reload")}</button><button className="danger" onClick={() => void persist(activeDocument.id, true)}>{t("conflict.overwrite")}</button></div>}
           {activeDocument && propertiesOpen && <div className="panel-resizer properties-resizer" role="separator" aria-label={t("app.resizeProperties")} aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginPanelResize("properties", event)} onKeyDown={(event) => resizeHandleKeyDown("properties", event)} />}
           {activeDocument && propertiesOpen && <PropertiesPanel width={settings.ui.propertiesWidth} state={activeDocument.parsed.frontMatter} onChange={updateFrontMatter} onClose={() => setPropertiesOpen(false)} />}

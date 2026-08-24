@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import type { Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TaskList from "@tiptap/extension-task-list";
@@ -8,11 +9,13 @@ import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 import type { OpenDocument, TiptapNode } from "../domain/types";
+import type { OutlineItem } from "../hooks/useOutline";
 import { AnnotatedLink, handleEditorLinkClick, IMAGE_ZOOM_REQUESTED_EVENT, LinkShortcut, MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
 import { loadWorkspaceAsset, openExternalLink } from "../services/desktop";
 import { sanitizeHtml } from "../services/htmlSanitizer";
 import { Toolbar } from "./Toolbar";
 import { TableControls } from "./TableControls";
+import { OutlineOverlay } from "./OutlineOverlay";
 import { t } from "../i18n";
 
 const lowlight = createLowlight(common);
@@ -24,6 +27,13 @@ interface EditorPaneProps {
   workspaceRoot: string;
   targetText?: string;
   targetNonce?: number;
+  onReady?: (info: { editor: Editor; scrollElement: HTMLDivElement } | null) => void;
+  outline: {
+    items: OutlineItem[];
+    activeIndex: number;
+    activeSectionIndex: number;
+    onSelect: (index: number) => void;
+  };
 }
 
 async function hydrateImages(node: TiptapNode, workspaceRoot: string, documentRelativePath: string): Promise<TiptapNode> {
@@ -45,7 +55,7 @@ function hasLocalImage(node: TiptapNode): boolean {
   return node.content?.some(hasLocalImage) ?? false;
 }
 
-export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, targetText, targetNonce }: EditorPaneProps) {
+export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, targetText, targetNonce, onReady, outline }: EditorPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pendingLink, setPendingLink] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<{ src: string; alt: string } | null>(null);
@@ -88,6 +98,15 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
     },
     onUpdate: ({ editor: current }) => onChange(current.getJSON() as TiptapNode),
   });
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || document.parsed.mode === "compatibility" || !scrollRef.current) {
+      onReady?.(null);
+      return;
+    }
+    onReady?.({ editor, scrollElement: scrollRef.current });
+    return () => onReady?.(null);
+  }, [document.parsed.mode, editor, onReady]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed || document.parsed.mode === "compatibility" || !hasLocalImage(document.parsed.doc)) return;
@@ -169,6 +188,12 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
         <EditorContent editor={editor} />
         <TableControls editor={editor} containerRef={scrollRef} />
       </div>
+      <OutlineOverlay
+        items={outline.items}
+        activeIndex={outline.activeIndex}
+        activeSectionIndex={outline.activeSectionIndex}
+        onSelect={outline.onSelect}
+      />
       {pendingLink && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPendingLink(null); }}>
           <div className="entry-dialog" role="alertdialog" aria-modal="true" aria-labelledby="external-link-title" onKeyDown={(event) => { if (event.key === "Escape") setPendingLink(null); }}>
