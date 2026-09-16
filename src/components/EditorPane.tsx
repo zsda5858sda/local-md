@@ -9,7 +9,7 @@ import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 import type { OpenDocument, TiptapNode } from "../domain/types";
-import { AnnotatedLink, handleEditorLinkClick, IMAGE_ZOOM_REQUESTED_EVENT, LinkShortcut, MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
+import { AnnotatedLink, handleEditorLinkClick, IMAGE_NODE_DRAG_ENDED_EVENT, IMAGE_NODE_DRAG_MOVED_EVENT, IMAGE_NODE_DRAG_STARTED_EVENT, IMAGE_ZOOM_REQUESTED_EVENT, LinkShortcut, MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
 import { importImageAsset, importImageDataUri, isTauri, loadWorkspaceAsset, openExternalLink } from "../services/desktop";
 import { sanitizeHtml } from "../services/htmlSanitizer";
 import { Toolbar } from "./Toolbar";
@@ -62,6 +62,9 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
   const [zoomedImage, setZoomedImage] = useState<{ src: string; alt: string } | null>(null);
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [imageDropActive, setImageDropActive] = useState(false);
+  const draggedImagePositionRef = useRef<number | null>(null);
+  const imageDropIndicatorRef = useRef<HTMLDivElement | null>(null);
+  const nativeFileDragRef = useRef(false);
   async function insertImageAsset(image: { relativePath: string }, position?: number): Promise<boolean> {
     if (!editor || editor.isDestroyed) return false;
     if (position !== undefined) editor.commands.setTextSelection(position);
@@ -96,9 +99,11 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
       handleDOMEvents: {
         click: (_view, event) => handleEditorLinkClick(event, setPendingLink),
         dragover: (_view, event) => {
-          if (!event.dataTransfer?.files.length) return false;
+          const transfer = event.dataTransfer;
+          if (!transfer) return false;
+          if (!transfer.files.length) return false;
           event.preventDefault();
-          event.dataTransfer.dropEffect = "copy";
+          transfer.dropEffect = "copy";
           setImageDropActive(true);
           return true;
         },
@@ -202,21 +207,29 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
     };
     void getCurrentWebview().onDragDropEvent(async ({ payload }) => {
       if (disposed) return;
+      const paths = "paths" in payload ? payload.paths : [];
       if (payload.type === "leave") {
+        nativeFileDragRef.current = false;
         setImageDropActive(false);
         return;
       }
       const position = payload.position.toLogical(window.devicePixelRatio);
       const isOverEditor = withinEditor(position.x, position.y);
-      if (payload.type === "enter" || payload.type === "over") {
-        setImageDropActive(isOverEditor);
+      if (payload.type === "enter") {
+        nativeFileDragRef.current = paths.length > 0;
+        setImageDropActive(isOverEditor && nativeFileDragRef.current);
         return;
       }
+      if (payload.type === "over") {
+        setImageDropActive(isOverEditor && nativeFileDragRef.current);
+        return;
+      }
+      nativeFileDragRef.current = false;
       setImageDropActive(false);
-      if (!isOverEditor) return;
+      if (!isOverEditor || !paths.length) return;
       setPasteError(null);
       let inserted = false;
-      for (const sourcePath of payload.paths) {
+      for (const sourcePath of paths) {
         try {
           const image = await importImageAsset(workspaceRoot, document.relativePath, sourcePath);
           if (disposed || !(await insertImageAsset(image, inserted ? undefined : editor.view.posAtCoords({ left: position.x, top: position.y })?.pos))) return;
@@ -229,6 +242,64 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
     }).then((unlisten) => { if (disposed) unlisten(); else stop = unlisten; });
     return () => { disposed = true; stop?.(); };
   }, [document.parsed.frontMatter, document.profile, editor]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const onImageDragStart = (event: Event) => {
+      const position = (event as CustomEvent<{ position?: unknown }>).detail?.position;
+      draggedImagePositionRef.current = typeof position === "number" ? position : null;
+    };
+    const onImageDragMove = (event: Event) => {
+      const detail = (event as CustomEvent<{ clientX?: unknown; clientY?: unknown }>).detail;
+      if (typeof detail?.clientX !== "number" || typeof detail.clientY !== "number") return;
+      const position = editor.view.posAtCoords({ left: detail.clientX, top: detail.clientY })?.pos;
+      if (position === undefined) return;
+      const cursor = editor.view.coordsAtPos(position);
+      const bounds = editor.view.dom.getBoundingClientRect();
+      const indicator = imageDropIndicatorRef.current ?? globalThis.document.createElement("div");
+      indicator.className = "image-drop-indicator";
+      indicator.style.left = `${bounds.left + 20}px`;
+      indicator.style.top = `${cursor.top - 2}px`;
+      indicator.style.width = `${Math.max(32, bounds.width - 40)}px`;
+      if (!imageDropIndicatorRef.current) {
+        globalThis.document.body.append(indicator);
+        imageDropIndicatorRef.current = indicator;
+      }
+    };
+    const onImageDragEnd = (event: Event) => {
+      imageDropIndicatorRef.current?.remove();
+      imageDropIndicatorRef.current = null;
+      const sourcePosition = draggedImagePositionRef.current;
+      draggedImagePositionRef.current = null;
+      if (sourcePosition === null) return;
+      const detail = (event as CustomEvent<{ clientX?: unknown; clientY?: unknown }>).detail;
+      if (typeof detail?.clientX !== "number" || typeof detail.clientY !== "number") return;
+      const image = editor.state.doc.nodeAt(sourcePosition);
+      const targetPosition = editor.view.posAtCoords({ left: detail.clientX, top: detail.clientY })?.pos;
+      if (!image || image.type.name !== "image" || targetPosition === undefined
+        || (targetPosition >= sourcePosition && targetPosition <= sourcePosition + image.nodeSize)) return;
+      const insertionPosition = targetPosition > sourcePosition
+        ? targetPosition - image.nodeSize
+        : targetPosition;
+      try {
+        editor.view.dispatch(editor.state.tr
+          .delete(sourcePosition, sourcePosition + image.nodeSize)
+          .insert(insertionPosition, image));
+      } catch {
+        setPasteError(t("editor.imageMoveFailed"));
+      }
+    };
+    editor.view.dom.addEventListener(IMAGE_NODE_DRAG_STARTED_EVENT, onImageDragStart);
+    editor.view.dom.addEventListener(IMAGE_NODE_DRAG_MOVED_EVENT, onImageDragMove);
+    editor.view.dom.addEventListener(IMAGE_NODE_DRAG_ENDED_EVENT, onImageDragEnd);
+    return () => {
+      editor.view.dom.removeEventListener(IMAGE_NODE_DRAG_STARTED_EVENT, onImageDragStart);
+      editor.view.dom.removeEventListener(IMAGE_NODE_DRAG_MOVED_EVENT, onImageDragMove);
+      editor.view.dom.removeEventListener(IMAGE_NODE_DRAG_ENDED_EVENT, onImageDragEnd);
+      imageDropIndicatorRef.current?.remove();
+      imageDropIndicatorRef.current = null;
+    };
+  }, [editor]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;

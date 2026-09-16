@@ -36,6 +36,7 @@
     "lowlight": "^3.3.0",
     "lucide-react": "^0.468.0",
     "minisearch": "^7.1.0",
+    "prosemirror-state": "^1.4.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "remark-frontmatter": "^5.0.0",

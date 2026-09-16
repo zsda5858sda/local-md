@@ -301,6 +301,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .safe-image-node { position: relative; display: block; max-width: 100%; margin: 1.2em auto; contain: layout paint; cursor: grab; }
 .safe-image-node.image-inline { display: inline-block; margin: 1.2em 1% 1.2em 0; vertical-align: top; }
 .safe-image-node:active { cursor: grabbing; }
+.safe-image-node.image-is-dragging { opacity: .42; cursor: grabbing; }
+.image-drop-indicator { position: fixed; z-index: 200; height: 1px; background: #8c8a84; pointer-events: none; }
 .safe-image-media { position: relative; display: block; }
 .safe-image-media img { display: block; width: 100%; border-radius: 4px; }
 .image-toolbar { position: absolute; z-index: 2; top: 8px; right: 8px; display: flex; gap: 4px; padding: 3px; background: rgba(39,38,34,.82); border-radius: 6px; opacity: 0; transition: opacity .12s ease; }

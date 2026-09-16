@@ -17,7 +17,11 @@ use percent_encoding::percent_decode_str;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{
+    menu::{Menu, MenuItem, Submenu},
+    AppHandle, Emitter, Manager, State,
+};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tempfile::Builder as TempBuilder;
 use walkdir::WalkDir;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
@@ -28,6 +32,14 @@ const SNAPSHOT_MIN_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_MARKDOWN_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
 const RECENT_WORKSPACE_FILE: &str = "recent-workspace.json";
+const QUIT_MENU_ID: &str = "quit-local-md";
+fn reveal_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
 
 static URI_SCHEME: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)^[a-z][a-z\d+.-]*:").expect("URI scheme regex must compile")
@@ -999,6 +1011,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if event.state() == ShortcutState::Pressed
+                        && shortcut == &Shortcut::new(Some(Modifiers::SUPER), Code::KeyL)
+                    {
+                        reveal_main_window(app);
+                    }
+                })
+                .build(),
+        )
         .manage(WatchState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             read_recent_workspace,
@@ -1021,8 +1044,16 @@ pub fn run() {
             scan_orphan_assets,
         ])
         .setup(|app| {
+            let quit = MenuItem::with_id(app, QUIT_MENU_ID, "結束 Local MD", true, Some("CmdOrCtrl+Q"))?;
+            let app_menu = Submenu::with_items(app, "Local MD", true, &[&quit])?;
+            app.set_menu(Menu::with_items(app, &[&app_menu])?)?;
+            let shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::KeyL);
+            app.global_shortcut().register(shortcut)?;
             if let Some(window) = app.get_webview_window("main") { window.set_title("Local MD")?; }
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == QUIT_MENU_ID { app.exit(0); }
         })
         .run(tauri::generate_context!())
         .expect("error while running Local MD");

@@ -195,6 +195,7 @@ const zhTW = {
   "editor.pasteImageUnsupported": "只支援貼上 PNG、JPEG、GIF、WebP、SVG 或 BMP 圖片。",
   "editor.pasteImageFailed": "讀取貼上的圖片失敗。",
   "editor.dropImageUnsupported": "拖入的檔案沒有支援的圖片。",
+  "editor.imageMoveFailed": "無法移動圖片，請再試一次。",
   "table.controls": "表格操作",
   "table.row": "列",
   "table.column": "欄",

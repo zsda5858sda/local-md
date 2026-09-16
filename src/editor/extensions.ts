@@ -11,6 +11,9 @@ type GetNodePosition = NodeViewRendererProps["getPos"];
 
 export const INSERT_LINK_REQUESTED_EVENT = "local-md:insert-link-requested";
 export const IMAGE_ZOOM_REQUESTED_EVENT = "local-md:image-zoom-requested";
+export const IMAGE_NODE_DRAG_STARTED_EVENT = "local-md:image-drag-started";
+export const IMAGE_NODE_DRAG_MOVED_EVENT = "local-md:image-drag-moved";
+export const IMAGE_NODE_DRAG_ENDED_EVENT = "local-md:image-drag-ended";
 
 export function linkHrefFromTarget(target: EventTarget | null): string | null {
   const element = target instanceof Element
@@ -93,6 +96,7 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
   let destroyed = false;
   let showCaptionInput = Boolean(attributes.caption);
   let resizing = false;
+  let dragging = false;
   let resizeMove: ((event: PointerEvent) => void) | null = null;
   let resizeFinish: (() => void) | null = null;
   let resizeFrame = 0;
@@ -101,7 +105,7 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
   const figure = document.createElement("figure");
   figure.className = "safe-image-node";
   figure.setAttribute("contenteditable", "false");
-  figure.draggable = true;
+  figure.draggable = false;
 
   const mediaWrap = document.createElement("div");
   mediaWrap.className = "safe-image-media";
@@ -152,6 +156,7 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
       ? attributes.width
       : null;
     figure.className = width ? "safe-image-node image-inline" : "safe-image-node";
+    figure.classList.toggle("image-is-dragging", dragging);
     figure.style.width = width ?? "";
   };
 
@@ -244,11 +249,51 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
     }));
   };
   const onDeleteClick = () => deleteImageNode(view, getPos);
+  let dragStart: { position: number; x: number; y: number } | null = null;
+  const onImagePointerDown = (event: PointerEvent) => {
+    if ((event.target as HTMLElement).closest("button, figcaption, .image-resize-handle")) {
+      return;
+    }
+    if (event.button !== 0) return;
+    const pos = getPos();
+    if (typeof pos !== "number" || !Number.isInteger(pos)) return;
+    event.preventDefault();
+    dragStart = { position: pos, x: event.clientX, y: event.clientY };
+    document.addEventListener("pointermove", onImagePointerMove);
+    document.addEventListener("pointerup", onImagePointerUp, { once: true });
+  };
+  const onImagePointerMove = (event: PointerEvent) => {
+    if (!dragStart) return;
+    if (!dragging && Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y) < 6) return;
+    if (!dragging) {
+      dragging = true;
+      applyLayout();
+      figure.dispatchEvent(new CustomEvent(IMAGE_NODE_DRAG_STARTED_EVENT, { bubbles: true, detail: { position: dragStart.position } }));
+    }
+    figure.dispatchEvent(new CustomEvent(IMAGE_NODE_DRAG_MOVED_EVENT, {
+      bubbles: true,
+      detail: { clientX: event.clientX, clientY: event.clientY },
+    }));
+  };
+  const onImagePointerUp = (event: PointerEvent) => {
+    if (!dragStart) return;
+    dragStart = null;
+    document.removeEventListener("pointermove", onImagePointerMove);
+    document.removeEventListener("pointerup", onImagePointerUp);
+    if (!dragging) return;
+    dragging = false;
+    applyLayout();
+    figure.dispatchEvent(new CustomEvent(IMAGE_NODE_DRAG_ENDED_EVENT, {
+      bubbles: true,
+      detail: { clientX: event.clientX, clientY: event.clientY },
+    }));
+  };
   captionButton.addEventListener("click", onCaptionClick);
   halfWidthButton.addEventListener("click", onHalfWidthClick);
   figcaption.addEventListener("blur", onCaptionBlur);
   zoomButton.addEventListener("click", onZoomClick);
   deleteButton.addEventListener("click", onDeleteClick);
+  figure.addEventListener("pointerdown", onImagePointerDown);
 
   const onResizePointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
@@ -311,7 +356,6 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
       return true;
     },
     stopEvent(event: Event) {
-      if (event.type.startsWith("drag")) return false;
       const target = event.target as globalThis.Node;
       return toolbar.contains(target)
         || figcaption.contains(target)
@@ -330,9 +374,12 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
       figcaption.removeEventListener("blur", onCaptionBlur);
       zoomButton.removeEventListener("click", onZoomClick);
       deleteButton.removeEventListener("click", onDeleteClick);
+      figure.removeEventListener("pointerdown", onImagePointerDown);
       resizeHandle.removeEventListener("pointerdown", onResizePointerDown);
       if (resizeMove) document.removeEventListener("pointermove", resizeMove);
       if (resizeFinish) document.removeEventListener("pointerup", resizeFinish);
+      document.removeEventListener("pointermove", onImagePointerMove);
+      document.removeEventListener("pointerup", onImagePointerUp);
       if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
     },
   };
