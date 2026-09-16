@@ -124,6 +124,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .tree-context-menu .danger { color: var(--danger); }
 .sidebar-footer { height: 38px; padding: 0 15px; display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; letter-spacing: .04em; animation: interface-enter .2s .06s var(--ease-out) both; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: none; }
+.word-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .search-panel { margin: 0 10px 7px; padding: 8px; max-height: 270px; overflow: auto; background: var(--paper); border: 1px solid #000; box-shadow: none; border-radius: 0; }
 .search-panel .search-field { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); }
 .search-panel .search-field svg { width: 14px; color: var(--muted); }
@@ -244,6 +245,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .tool-tooltip kbd { padding-left: 8px; border-left: 1px solid #555; color: #bbb; font-family: inherit; font-size: 9px; font-weight: 600; }
 .tool-separator { width: 1px; height: 19px; margin: 0 4px; background: var(--line); }
 .editor-scroll { min-height: 0; flex: 1; overflow: auto; background: var(--paper); }
+.editor-scroll.image-drop-active { box-shadow: inset 0 0 0 3px var(--green); background: var(--green-soft); }
 .ProseMirror { min-height: calc(100vh - 138px); max-width: 900px; margin: 0 auto; padding: 64px 72px 180px; caret-color: var(--green); font-size: var(--document-body-size, 15px); }
 .ProseMirror:focus { outline: none; }
 .ProseMirror > *:first-child { margin-top: 0; }
@@ -296,7 +298,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .table-controls i { width: 1px; height: 18px; margin: 0 2px; background: var(--line); }
 .ProseMirror hr { margin: 34px 0; border: 0; border-top: 1px solid #d0cec4; }
 .ProseMirror img { max-width: 100%; border-radius: 4px; }
-.safe-image-node { position: relative; display: block; max-width: 100%; margin: 1.2em auto; cursor: grab; }
+.safe-image-node { position: relative; display: block; max-width: 100%; margin: 1.2em auto; contain: layout paint; cursor: grab; }
+.safe-image-node.image-inline { display: inline-block; margin: 1.2em 1% 1.2em 0; vertical-align: top; }
 .safe-image-node:active { cursor: grabbing; }
 .safe-image-media { position: relative; display: block; }
 .safe-image-media img { display: block; width: 100%; border-radius: 4px; }

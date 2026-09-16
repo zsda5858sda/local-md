@@ -99,9 +99,10 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZ
     setImportError(null);
     setImporting(true);
     try {
-      const asset = await chooseAndImportImage(workspaceRoot, documentRelativePath);
-      if (asset) {
-        editor.chain().focus().setImage({ src: asset.relativePath }).run();
+      const image = await chooseAndImportImage(workspaceRoot, documentRelativePath);
+      if (image && !editor.isDestroyed) {
+        const fileName = image.relativePath.split("/").at(-1) ?? "圖片";
+        editor.chain().focus().setImage({ src: image.relativePath, alt: fileName }).run();
         setDialog(null);
       }
     } catch (error) {
@@ -199,6 +200,7 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZ
               </form>
             ) : (
               <div className="image-dialog-content">
+                <p>{t("toolbar.imageUploadHint")}</p>
                 <button type="button" className="upload-file-button" disabled={importing} onClick={() => void browseLocalImage()}>
                   {importing ? t("toolbar.imageImporting") : t("toolbar.imageUploadButton")}
                 </button>

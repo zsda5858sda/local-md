@@ -27,6 +27,7 @@ const SNAPSHOT_RETENTION: usize = 5;
 const SNAPSHOT_MIN_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_MARKDOWN_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+const RECENT_WORKSPACE_FILE: &str = "recent-workspace.json";
 
 static URI_SCHEME: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)^[a-z][a-z\d+.-]*:").expect("URI scheme regex must compile")
@@ -44,6 +45,37 @@ static LINK_DEFINITION: Lazy<Regex> = Lazy::new(|| {
 });
 
 struct WatchState(Mutex<Option<RecommendedWatcher>>);
+
+fn recent_workspace_path(app: &AppHandle) -> Result<PathBuf, SaveError> {
+    let directory = app.path().app_config_dir().map_err(|error| error.to_string())?;
+    fs::create_dir_all(&directory).map_err(|error| format!("建立 App 設定資料夾失敗：{error}"))?;
+    Ok(directory.join(RECENT_WORKSPACE_FILE))
+}
+
+#[tauri::command]
+fn read_recent_workspace(app: AppHandle) -> Result<Option<String>, SaveError> {
+    let path = recent_workspace_path(&app)?;
+    let Ok(raw) = fs::read_to_string(path) else { return Ok(None); };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else { return Ok(None); };
+    let Some(root) = value.get("lastWorkspace").and_then(|value| value.as_str()) else { return Ok(None); };
+    Ok(canonical_root(root).ok().map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn remember_workspace(app: AppHandle, root: String) -> Result<(), SaveError> {
+    let root = canonical_root(&root)?;
+    let path = recent_workspace_path(&app)?;
+    let parent = path.parent().ok_or("無法判定 App 設定資料夾")?;
+    let bytes = serde_json::to_vec_pretty(&serde_json::json!({ "lastWorkspace": root }))
+        .map_err(|error| error.to_string())?;
+    let mut temporary = TempBuilder::new().prefix(".recent-workspace-").suffix(".tmp").tempfile_in(parent)
+        .map_err(|error| error.to_string())?;
+    temporary.write_all(&bytes).map_err(|error| error.to_string())?;
+    temporary.write_all(b"\n").map_err(|error| error.to_string())?;
+    temporary.as_file().sync_all().map_err(|error| error.to_string())?;
+    let (_file, temporary_path) = temporary.keep().map_err(|error| error.to_string())?;
+    Ok(atomic_replace(&temporary_path, &path)?)
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -690,6 +722,26 @@ fn read_workspace_asset(root: String, document_relative_path: String, asset_refe
     Ok(Some(format!("data:{mime};base64,{}", BASE64.encode(bytes))))
 }
 
+#[tauri::command]
+fn resolve_workspace_asset_path(root: String, document_relative_path: String, asset_reference: String) -> Result<Option<String>, SaveError> {
+    if asset_reference.starts_with('#') || asset_reference.starts_with('/') || URI_SCHEME.is_match(&asset_reference) {
+        return Ok(None);
+    }
+    let relative = normalized_asset_path(&document_relative_path, &asset_reference)?;
+    let (_, path) = scoped_path(&root, &relative.to_string_lossy(), true)?;
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    let expected_mime = match extension.as_str() {
+        "png" => "image/png", "jpg" | "jpeg" => "image/jpeg", "gif" => "image/gif",
+        "webp" => "image/webp", "bmp" => "image/bmp", "svg" => "image/svg+xml",
+        _ => return Err("只允許載入 PNG、JPEG、GIF、WebP、SVG 或 BMP 圖片".into()),
+    };
+    let metadata = fs::metadata(&path).map_err(|error| format!("讀取圖片資訊失敗：{error}"))?;
+    if metadata.len() > MAX_IMAGE_BYTES { return Err("圖片超過 20 MB 限制".into()); }
+    let bytes = fs::read(&path).map_err(|error| format!("讀取圖片失敗：{error}"))?;
+    if sniff_image_mime(&bytes) != Some(expected_mime) { return Err("圖片副檔名與檔案內容不符".into()); }
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 fn image_extension_and_mime(path: &Path) -> Result<(String, &'static str), String> {
     let extension = path.extension()
         .and_then(|value| value.to_str())
@@ -705,6 +757,35 @@ fn image_extension_and_mime(path: &Path) -> Result<(String, &'static str), Strin
         _ => return Err("只允許匯入 PNG、JPEG、GIF、WebP、SVG 或 BMP 圖片".into()),
     };
     Ok((extension, mime))
+}
+
+fn validated_image_source(
+    source_path: &str,
+) -> Result<(PathBuf, Vec<u8>, &'static str), SaveError> {
+    let source_input = Path::new(source_path);
+    if !source_input.is_absolute()
+        || source_input
+            .components()
+            .any(|part| matches!(part, Component::ParentDir))
+    {
+        return Err("圖片來源必須是不含 .. 的絕對檔案路徑".into());
+    }
+    let source =
+        fs::canonicalize(source_input).map_err(|error| format!("圖片來源無法開啟：{error}"))?;
+    if !source.is_file() {
+        return Err("圖片來源不是檔案".into());
+    }
+    let metadata = fs::metadata(&source).map_err(|error| format!("讀取圖片資訊失敗：{error}"))?;
+    if metadata.len() > MAX_IMAGE_BYTES {
+        return Err("圖片超過 20 MB 限制".into());
+    }
+
+    let (_, expected_mime) = image_extension_and_mime(&source)?;
+    let bytes = fs::read(&source).map_err(|error| format!("讀取圖片失敗：{error}"))?;
+    if sniff_image_mime(&bytes) != Some(expected_mime) {
+        return Err("圖片副檔名與檔案內容不符".into());
+    }
+    Ok((source, bytes, expected_mime))
 }
 
 fn sanitized_image_stem(path: &Path) -> String {
@@ -727,6 +808,30 @@ fn sanitized_image_stem(path: &Path) -> String {
 
 #[tauri::command]
 fn import_image_asset(root: String, document_relative_path: String, source_path: String) -> Result<ImportedImageAsset, SaveError> {
+    let (source, bytes, _) = validated_image_source(&source_path)?;
+    let (extension, _) = image_extension_and_mime(&source)?;
+    store_imported_image(root, document_relative_path, source.file_name().and_then(|name| name.to_str()).unwrap_or("image"), &extension, bytes)
+}
+
+#[tauri::command]
+fn import_image_data_uri(root: String, document_relative_path: String, file_name: String, data_uri: String) -> Result<ImportedImageAsset, SaveError> {
+    let (header, payload) = data_uri.split_once(',').ok_or("圖片資料格式無效")?;
+    let (extension, mime) = match header {
+        "data:image/png;base64" => ("png", "image/png"),
+        "data:image/jpeg;base64" => ("jpg", "image/jpeg"),
+        "data:image/gif;base64" => ("gif", "image/gif"),
+        "data:image/webp;base64" => ("webp", "image/webp"),
+        "data:image/svg+xml;base64" => ("svg", "image/svg+xml"),
+        "data:image/bmp;base64" => ("bmp", "image/bmp"),
+        _ => return Err("只允許匯入 PNG、JPEG、GIF、WebP、SVG 或 BMP 圖片".into()),
+    };
+    let bytes = BASE64.decode(payload).map_err(|_| "圖片資料無法解碼")?;
+    if bytes.len() as u64 > MAX_IMAGE_BYTES { return Err("圖片超過 20 MB 限制".into()); }
+    if sniff_image_mime(&bytes) != Some(mime) { return Err("圖片格式與內容不符".into()); }
+    store_imported_image(root, document_relative_path, &file_name, extension, bytes)
+}
+
+fn store_imported_image(root: String, document_relative_path: String, source_name: &str, extension: &str, bytes: Vec<u8>) -> Result<ImportedImageAsset, SaveError> {
     let canonical_workspace = canonical_root(&root)?;
     let document_relative = validate_relative(&document_relative_path)?;
     let (_, document_path) = scoped_path(&root, &document_relative_path, true)?;
@@ -734,24 +839,9 @@ fn import_image_asset(root: String, document_relative_path: String, source_path:
         return Err("圖片只能匯入至 Workspace 內既有的 Markdown 文件".into());
     }
 
-    let source_input = Path::new(&source_path);
-    if !source_input.is_absolute() || source_input.components().any(|part| matches!(part, Component::ParentDir)) {
-        return Err("圖片來源必須是不含 .. 的絕對檔案路徑".into());
-    }
-    let source = fs::canonicalize(source_input).map_err(|error| format!("圖片來源無法開啟：{error}"))?;
-    if !source.is_file() { return Err("圖片來源不是檔案".into()); }
-    let metadata = fs::metadata(&source).map_err(|error| format!("讀取圖片資訊失敗：{error}"))?;
-    if metadata.len() > MAX_IMAGE_BYTES { return Err("圖片超過 20 MB 限制".into()); }
-
-    let (extension, expected_mime) = image_extension_and_mime(&source)?;
-    let bytes = fs::read(&source).map_err(|error| format!("讀取圖片失敗：{error}"))?;
-    if sniff_image_mime(&bytes) != Some(expected_mime) {
-        return Err("圖片副檔名與檔案內容不符".into());
-    }
-
     let document_parent = document_relative.parent().unwrap_or(Path::new(""));
     let asset_directory = document_parent.join("assets");
-    let stem = sanitized_image_stem(&source);
+    let stem = sanitized_image_stem(Path::new(source_name));
     let short_hash = &hash_bytes(&bytes)[..8];
     let mut attempt = 0_u32;
     let (destination, file_name) = loop {
@@ -911,6 +1001,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(WatchState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
+            read_recent_workspace,
+            remember_workspace,
             scan_workspace,
             read_markdown,
             write_markdown,
@@ -920,7 +1012,9 @@ pub fn run() {
             read_workspace_settings,
             write_workspace_settings,
             read_workspace_asset,
+            resolve_workspace_asset_path,
             import_image_asset,
+            import_image_data_uri,
             watch_workspace,
             import_workspace,
             export_workspace,
@@ -1071,6 +1165,23 @@ mod tests {
         assert_ne!(first.relative_path, second.relative_path);
         assert_eq!(fs::read(workspace.path().join("notes").join(&first.relative_path)).unwrap(), [0x89, 0x50, 0x4e, 0x47, 0x01]);
         assert!(workspace.path().join("notes").join(second.relative_path).exists());
+    }
+
+    #[test]
+    fn imports_clipboard_image_data_next_to_document() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::create_dir(workspace.path().join("notes")).unwrap();
+        fs::write(workspace.path().join("notes/note.md"), "# Note\n").unwrap();
+
+        let image = import_image_data_uri(
+            workspace.path().to_string_lossy().into(),
+            "notes/note.md".into(),
+            "clipboard.png".into(),
+            "data:image/png;base64,iVBORwE=".into(),
+        ).unwrap();
+
+        assert!(image.relative_path.starts_with("assets/clipboard-"));
+        assert_eq!(fs::read(workspace.path().join("notes").join(image.relative_path)).unwrap(), [0x89, 0x50, 0x4e, 0x47, 0x01]);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Editor, generateHTML } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { parseMarkdown, semanticRoundTrip, serializeMarkdown } from "../src/markdown/pipeline";
@@ -15,6 +15,25 @@ import type { TiptapNode } from "../src/domain/types";
 const fixture = (name: string) => readFileSync(resolve(process.cwd(), "tests", "fixtures", name), "utf8");
 
 describe("canonical Markdown round-trip", () => {
+  it("keeps embedded image bytes and description through insertion, saving and reopening", () => {
+    const src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9WQAAAAASUVORK5CYII=";
+    const parsed = parseMarkdown("圖片如下：\n");
+    const editor = new Editor({
+      extensions: [StarterKit, SafeImage.configure({ inline: true, allowBase64: false })],
+      content: parsed.doc,
+    });
+    editor.commands.setTextSelection(6);
+    editor.commands.setImage({ src, alt: "流程圖.png" });
+    const saved = serializeMarkdown(editor.getJSON() as TiptapNode, parsed.frontMatter);
+    expect(saved).toContain(`![流程圖.png](${src})`);
+    const reopened = parseMarkdown(saved);
+    expect(reopened.mode).toBe("visual");
+    editor.commands.setContent(reopened.doc);
+    expect(editor.view.dom.querySelector("img")?.getAttribute("src")).toBe(src);
+    expect(serializeMarkdown(editor.getJSON() as TiptapNode, reopened.frontMatter)).toBe(saved);
+    editor.destroy();
+  });
+
   for (const name of [
     "headings.md", "inline-formatting.md", "soft-break.md", "hard-break.md",
     "nested-list.md", "nested-list-two-digit-marker.md", "loose-vs-tight-list.md",
@@ -161,6 +180,22 @@ describe("canonical Markdown round-trip", () => {
     editor.destroy();
   });
 
+  it("loads workspace image bytes only into the image view", async () => {
+    const element = document.createElement("div");
+    const source = "data:image/png;base64,iVBORwE=";
+    const resolveLocalImage = vi.fn(async () => source);
+    const editor = new Editor({
+      element,
+      extensions: [StarterKit, SafeImage.configure({ inline: true, allowBase64: false, resolveLocalImage } as never)],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "assets/photo.png", markdownSrc: "assets/photo.png", alt: "photo" } }] }] },
+    });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(resolveLocalImage).toHaveBeenCalledWith("assets/photo.png");
+    expect(element.querySelector("img")?.getAttribute("src")).toBe(source);
+    expect((editor.getJSON() as TiptapNode).content?.[0]?.content?.[0]?.attrs?.src).toBe("assets/photo.png");
+    editor.destroy();
+  });
+
   it("edits captions and deletes images through node-view controls", () => {
     const element = document.createElement("div");
     const editor = new Editor({
@@ -168,7 +203,10 @@ describe("canonical Markdown round-trip", () => {
       extensions: [StarterKit, SafeImage.configure({ inline: true, allowBase64: false })],
       content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "assets/photo.png", alt: "photo" } }] }] },
     });
-    const captionButton = element.querySelector<HTMLButtonElement>(".image-toolbar-btn");
+    const halfWidthButton = element.querySelector<HTMLButtonElement>("[aria-label='設為一行兩張圖片']");
+    halfWidthButton?.click();
+    expect((editor.getJSON() as TiptapNode).content?.[0]?.content?.[0]?.attrs?.width).toBe("49%");
+    const captionButton = element.querySelector<HTMLButtonElement>("[aria-label='新增或編輯圖片說明']");
     expect(captionButton).not.toBeNull();
     captionButton?.click();
     const caption = element.querySelector<HTMLElement>("figcaption.image-caption");
@@ -179,6 +217,9 @@ describe("canonical Markdown round-trip", () => {
     }
     const imageNode = (editor.getJSON() as TiptapNode).content?.[0]?.content?.[0];
     expect(imageNode?.attrs?.caption).toBe("圖片說明");
+    expect(imageNode?.attrs?.alt).toBe("圖片說明");
+    const saved = serializeMarkdown(editor.getJSON() as TiptapNode, parseMarkdown("").frontMatter);
+    expect(saved).toContain("![圖片說明](assets/photo.png)");
     element.querySelector<HTMLButtonElement>(".image-toolbar-danger")?.click();
     expect(element.querySelector("figure.safe-image-node")).toBeNull();
     editor.destroy();

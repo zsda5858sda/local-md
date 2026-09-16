@@ -82,14 +82,21 @@ function deleteImageNode(view: EditorView, getPos: GetNodePosition) {
   view.dispatch(view.state.tr.delete(pos, pos + current.nodeSize));
 }
 
-export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView, getPos: GetNodePosition) {
+export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView, getPos: GetNodePosition, resolveLocalImage?: (source: string) => Promise<string | null>) {
   const nodeType = node.type;
   let attributes = node.attrs as SafeImageAttributes;
   let remoteLoaded = false;
+  let localSource: string | null = null;
+  let resolvedLocalSource: string | null = null;
+  let resolvedLocalData: string | null = null;
+  let localLoadError = false;
+  let destroyed = false;
   let showCaptionInput = Boolean(attributes.caption);
   let resizing = false;
   let resizeMove: ((event: PointerEvent) => void) | null = null;
   let resizeFinish: (() => void) | null = null;
+  let resizeFrame = 0;
+  let pendingWidth = "";
 
   const figure = document.createElement("figure");
   figure.className = "safe-image-node";
@@ -109,6 +116,13 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
   captionButton.setAttribute("aria-label", t("image.toggleCaption"));
   captionButton.textContent = t("image.toggleCaptionShort");
 
+  const halfWidthButton = document.createElement("button");
+  halfWidthButton.type = "button";
+  halfWidthButton.className = "image-toolbar-btn";
+  halfWidthButton.title = t("image.halfWidth");
+  halfWidthButton.setAttribute("aria-label", t("image.halfWidth"));
+  halfWidthButton.textContent = t("image.halfWidthShort");
+
   const zoomButton = document.createElement("button");
   zoomButton.type = "button";
   zoomButton.className = "image-toolbar-btn";
@@ -122,7 +136,7 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
   deleteButton.title = t("image.delete");
   deleteButton.setAttribute("aria-label", t("image.delete"));
   deleteButton.textContent = t("image.deleteShort");
-  toolbar.append(captionButton, zoomButton, deleteButton);
+  toolbar.append(halfWidthButton, captionButton, zoomButton, deleteButton);
 
   const resizeHandle = document.createElement("span");
   resizeHandle.className = "image-resize-handle";
@@ -133,15 +147,19 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
   figcaption.className = "image-caption";
   figcaption.setAttribute("data-placeholder", t("image.captionPlaceholder"));
 
-  const render = () => {
-    const source = imageSource(attributes);
-    const src = String(attributes.src ?? source);
-    const alt = imageAlt(attributes);
-    const title = typeof attributes.title === "string" ? attributes.title : "";
+  const applyLayout = () => {
     const width = typeof attributes.width === "string" && /^\d+(?:\.\d+)?%$/.test(attributes.width)
       ? attributes.width
       : null;
+    figure.className = width ? "safe-image-node image-inline" : "safe-image-node";
     figure.style.width = width ?? "";
+  };
+
+  const render = () => {
+    const source = imageSource(attributes);
+    const alt = imageAlt(attributes);
+    const title = typeof attributes.title === "string" ? attributes.title : "";
+    applyLayout();
     if (isRemoteImageSource(source) && !remoteLoaded) {
       mediaWrap.className = "remote-image-placeholder";
       mediaWrap.setAttribute("role", "button");
@@ -152,18 +170,43 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
       figure.replaceChildren(mediaWrap);
       return;
     }
+    const isLocalSource = Boolean(source) && !/^(?:[a-z][a-z\d+.-]*:|#|\/)/i.test(source);
+    if (isLocalSource && resolveLocalImage && resolvedLocalSource !== source) {
+      if (localSource !== source) {
+        localSource = source;
+        localLoadError = false;
+        void resolveLocalImage(source).then((src) => {
+          if (destroyed || localSource !== source) return;
+          resolvedLocalSource = src === null ? null : source;
+          resolvedLocalData = src;
+          localLoadError = src === null;
+          render();
+        }).catch(() => {
+          if (destroyed || localSource !== source) return;
+          localLoadError = true;
+          render();
+        });
+      }
+      mediaWrap.className = "local-image-placeholder";
+      mediaWrap.replaceChildren(document.createTextNode(localLoadError ? t("image.localLoadFailed") : t("image.localLoading")));
+      figure.replaceChildren(mediaWrap);
+      return;
+    }
     mediaWrap.className = "safe-image-media";
     mediaWrap.removeAttribute("role");
     mediaWrap.removeAttribute("tabindex");
     mediaWrap.removeAttribute("data-remote-src");
     mediaWrap.removeAttribute("aria-label");
     const image = document.createElement("img");
-    image.src = src;
+    image.src = isLocalSource && resolvedLocalSource === source
+      ? (resolvedLocalData ?? "")
+      : String(attributes.src ?? source);
     image.alt = alt;
+    image.decoding = "async";
     image.draggable = false;
     if (title) image.title = title;
     mediaWrap.replaceChildren(image, resizeHandle);
-    figcaption.textContent = typeof attributes.caption === "string" ? attributes.caption : "";
+    figcaption.textContent = typeof attributes.caption === "string" ? attributes.caption : alt;
     figure.replaceChildren(mediaWrap, toolbar, ...(showCaptionInput ? [figcaption] : []));
   };
 
@@ -188,8 +231,10 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
     render();
     if (showCaptionInput) window.requestAnimationFrame(() => figcaption.focus());
   };
+  const onHalfWidthClick = () => setImageAttribute(view, getPos, { width: "49%" });
   const onCaptionBlur = () => {
-    setImageAttribute(view, getPos, { caption: figcaption.textContent?.trim() || null });
+    const description = figcaption.textContent?.trim() || "";
+    setImageAttribute(view, getPos, { caption: description || null, alt: description });
   };
   const onZoomClick = () => {
     const source = imageSource(attributes);
@@ -200,6 +245,7 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
   };
   const onDeleteClick = () => deleteImageNode(view, getPos);
   captionButton.addEventListener("click", onCaptionClick);
+  halfWidthButton.addEventListener("click", onHalfWidthClick);
   figcaption.addEventListener("blur", onCaptionBlur);
   zoomButton.addEventListener("click", onZoomClick);
   deleteButton.addEventListener("click", onDeleteClick);
@@ -215,7 +261,13 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
     resizeMove = (moveEvent: PointerEvent) => {
       const nextPx = Math.max(80, Math.min(containerWidth, startWidth + moveEvent.clientX - startX));
       const percent = Math.round((nextPx / containerWidth) * 1000) / 10;
-      figure.style.width = `${percent}%`;
+      pendingWidth = `${percent}%`;
+      if (!resizeFrame) {
+        resizeFrame = window.requestAnimationFrame(() => {
+          figure.style.width = pendingWidth;
+          resizeFrame = 0;
+        });
+      }
     };
     resizeFinish = () => {
       resizing = false;
@@ -223,6 +275,11 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
       if (resizeFinish) document.removeEventListener("pointerup", resizeFinish);
       resizeMove = null;
       resizeFinish = null;
+      if (resizeFrame) {
+        window.cancelAnimationFrame(resizeFrame);
+        resizeFrame = 0;
+        figure.style.width = pendingWidth;
+      }
       setImageAttribute(view, getPos, { width: figure.style.width || null });
     };
     document.addEventListener("pointermove", resizeMove);
@@ -235,10 +292,22 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
     dom: figure,
     update(nextNode: ProseMirrorNode) {
       if (nextNode.type !== nodeType) return false;
-      const previousSource = imageSource(attributes);
+      const previous = attributes;
+      const previousSource = imageSource(previous);
       attributes = nextNode.attrs as SafeImageAttributes;
-      if (imageSource(attributes) !== previousSource) remoteLoaded = false;
-      if (!resizing) render();
+      if (imageSource(attributes) !== previousSource) {
+        remoteLoaded = false;
+        localSource = null;
+        resolvedLocalSource = null;
+        resolvedLocalData = null;
+        localLoadError = false;
+      }
+      const mediaChanged = imageSource(attributes) !== previousSource
+        || imageAlt(attributes) !== imageAlt(previous)
+        || attributes.title !== previous.title
+        || attributes.caption !== previous.caption;
+      if (!resizing && mediaChanged) render();
+      else applyLayout();
       return true;
     },
     stopEvent(event: Event) {
@@ -253,15 +322,18 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
       return true;
     },
     destroy() {
+      destroyed = true;
       mediaWrap.removeEventListener("click", onClick);
       mediaWrap.removeEventListener("keydown", onKeyDown);
       captionButton.removeEventListener("click", onCaptionClick);
+      halfWidthButton.removeEventListener("click", onHalfWidthClick);
       figcaption.removeEventListener("blur", onCaptionBlur);
       zoomButton.removeEventListener("click", onZoomClick);
       deleteButton.removeEventListener("click", onDeleteClick);
       resizeHandle.removeEventListener("pointerdown", onResizePointerDown);
       if (resizeMove) document.removeEventListener("pointermove", resizeMove);
       if (resizeFinish) document.removeEventListener("pointerup", resizeFinish);
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
     },
   };
 }
@@ -303,6 +375,12 @@ export const MarkdownMetadata = Extension.create({
 
 export const SafeImage = Image.extend({
   draggable: true,
+  addOptions() {
+    return {
+      ...(this.parent?.() ?? { inline: false, allowBase64: false, HTMLAttributes: {} }),
+      resolveLocalImage: undefined as ((source: string) => Promise<string | null>) | undefined,
+    } as never;
+  },
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -328,6 +406,7 @@ export const SafeImage = Image.extend({
     return ["img", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, width ? { style: `width: ${width}` } : {})];
   },
   addNodeView() {
-    return ({ node, view, getPos }) => createSafeImageNodeView(node, view, getPos);
+    const { resolveLocalImage } = this.options as unknown as { resolveLocalImage?: (source: string) => Promise<string | null> };
+    return ({ node, view, getPos }) => createSafeImageNodeView(node, view, getPos, resolveLocalImage);
   },
 });

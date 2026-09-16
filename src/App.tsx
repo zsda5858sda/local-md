@@ -10,6 +10,7 @@ import type { FrontMatterState, OpenDocument, SearchHit, TiptapNode, WorkspaceEn
 import { parseMarkdown } from "./markdown/pipeline";
 import {
   chooseWorkspace, createEntry, deleteEntry, errorMessage, exportWorkspace, importFolder, isTauri,
+  readRecentWorkspace, rememberWorkspace,
   readDocument, readWorkspaceSettings, renameEntry, saveDocument, scanOrphanAssets,
   scanWorkspace,
 } from "./services/desktop";
@@ -28,6 +29,7 @@ import { useWorkspace, useWorkspaceWatcher } from "./hooks/useWorkspace";
 import { useWorkspaceSearch } from "./hooks/useWorkspaceSearch";
 import { TAB_GROUP_COLORS, useTabGroups, type TabDropTarget } from "./hooks/useTabGroups";
 import { t } from "./i18n";
+import { calculateTextStats } from "./services/textStats";
 
 function flattenFiles(entries: WorkspaceEntry[]): WorkspaceEntry[] {
   return entries.flatMap((entry) => entry.kind === "file" ? [entry] : flattenFiles(entry.children ?? []));
@@ -96,6 +98,7 @@ export default function App() {
   const [moveDialog, setMoveDialog] = useState<MoveDialog | null>(null);
   const [draggedFilePath, setDraggedFilePath] = useState<string | null>(null);
   const [fileDropTarget, setFileDropTarget] = useState<string | null>(null);
+  const activeTextStats = useMemo(() => activeDocument ? calculateTextStats(activeDocument.parsed.doc) : null, [activeDocument?.parsed.doc]);
   const { persist, scheduleSave } = useDocumentPersistence({
     workspaceRoot,
     autoSaveEnabled: settings.settings.autoSaveEnabled,
@@ -122,6 +125,7 @@ export default function App() {
   const tabPointerDragRef = useRef<{ sourceId: string; startX: number; startY: number; dragging: boolean } | null>(null);
   const suppressTabClickRef = useRef(false);
   const zoomWheelRef = useRef({ delta: 0, lastAt: 0, lastStepAt: 0 });
+  const restoredRecentWorkspaceRef = useRef(false);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 2800);
@@ -173,7 +177,7 @@ export default function App() {
 
   useEffect(() => { refreshSearchResults(searchQuery, searchRegex, searchScope); }, [activeId, refreshSearchResults, searchQuery, searchRegex, searchScope]);
 
-  const openWorkspace = useCallback(async () => {
+  const openWorkspace = useCallback(async (requestedRoot?: string) => {
 if (
   documentsRef.current.some((doc) => doc.dirty || doc.saving) &&
   !window.confirm(t("app.switchWorkspaceConfirm"))
@@ -185,7 +189,7 @@ const selectedTheme = settings.ui.theme;
     setFatalError(null);
     setSessionReady(false);
     try {
-      const root = await chooseWorkspace();
+      const root = requestedRoot ?? await chooseWorkspace();
       if (!root) return;
       const [entries, settingsResult] = await Promise.all([scanWorkspace(root), readWorkspaceSettings(root)]);
       const files = flattenFiles(entries);
@@ -219,11 +223,20 @@ const selectedTheme = settings.ui.theme;
       setSearchHits([]);
       setSearchTarget(null);
       setSessionReady(true);
+      void rememberWorkspace(root);
       void indexWorkspace(root, entries);
     } catch (error) {
       setFatalError(errorMessage(error));
     } finally { setLoading(false); }
   }, [indexWorkspace, selectDocument, settings.ui.theme, updateDocuments]);
+
+  useEffect(() => {
+    if (restoredRecentWorkspaceRef.current) return;
+    restoredRecentWorkspaceRef.current = true;
+    void readRecentWorkspace().then((root) => {
+      if (root) void openWorkspace(root);
+    });
+  }, [openWorkspace]);
 
   const openFile = useMemo(() => withWorkspace(async (root, entry: WorkspaceEntry, keepSearchTarget = false) => {
     if (entry.kind !== "file") return;
@@ -812,6 +825,7 @@ const selectedTheme = settings.ui.theme;
             {breadcrumbs.map((part, index) => <span key={`${part}-${index}`}>{index > 0 && <ChevronRight />}{part}</span>)}
           </div>
           <div className="topbar-actions">
+            {activeTextStats && <span className="word-count" title={t("app.wordCountTitle")}>{t("app.wordCount", { words: activeTextStats.words, characters: activeTextStats.characters })}</span>}
             {activeDocument && <span className={`save-state ${activeDocument.conflict ? "conflict" : ""}`}>{activeDocument.conflict ? <><AlertTriangle />{t("app.conflict")}</> : activeDocument.saving ? t("app.saving") : activeDocument.dirty ? t("app.unsaved") : <><Check />{t("app.saved")}</>}</span>}
             <button className="icon-button" title={t("app.saveNow")} aria-label={t("app.saveNow")} disabled={!activeDocument || activeDocument.saving} onClick={() => activeId && void persist(activeId)}><Save /></button>
             <button className="icon-button" title={t("app.pageProperties")} aria-label={t("app.pageProperties")} disabled={!activeDocument} onClick={() => setPropertiesOpen((value) => !value)}><PanelRightOpen /></button>

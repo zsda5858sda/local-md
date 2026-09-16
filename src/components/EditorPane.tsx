@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TaskList from "@tiptap/extension-task-list";
@@ -9,12 +10,13 @@ import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 import type { OpenDocument, TiptapNode } from "../domain/types";
 import { AnnotatedLink, handleEditorLinkClick, IMAGE_ZOOM_REQUESTED_EVENT, LinkShortcut, MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
-import { loadWorkspaceAsset, openExternalLink } from "../services/desktop";
+import { importImageAsset, importImageDataUri, isTauri, loadWorkspaceAsset, openExternalLink } from "../services/desktop";
 import { sanitizeHtml } from "../services/htmlSanitizer";
 import { Toolbar } from "./Toolbar";
 import { TableControls } from "./TableControls";
 import { t } from "../i18n";
 import { CodeBlockView } from "./CodeBlockView";
+import { imageDataFromFile } from "../services/embeddedImage";
 
 const lowlight = createLowlight(common);
 const CodeBlockWithControls = CodeBlockLowlight.extend({
@@ -36,29 +38,37 @@ interface EditorPaneProps {
   onZoomIn: () => void;
 }
 
-async function hydrateImages(node: TiptapNode, workspaceRoot: string, documentRelativePath: string): Promise<TiptapNode> {
-  const content = node.content ? await Promise.all(node.content.map((child) => hydrateImages(child, workspaceRoot, documentRelativePath))) : undefined;
+async function migrateEmbeddedImages(node: TiptapNode, workspaceRoot: string, documentRelativePath: string): Promise<TiptapNode> {
+  const content = node.content ? await Promise.all(node.content.map((child) => migrateEmbeddedImages(child, workspaceRoot, documentRelativePath))) : undefined;
   if (node.type !== "image") return { ...node, ...(content ? { content } : {}) };
   const markdownSrc = String(node.attrs?.markdownSrc ?? node.attrs?.src ?? "");
-  if (!markdownSrc || /^(?:[a-z][a-z\d+.-]*:|#|\/)/i.test(markdownSrc)) return { ...node, ...(content ? { content } : {}) };
-  try {
-    const src = await loadWorkspaceAsset(workspaceRoot, documentRelativePath, markdownSrc);
-    return src ? { ...node, attrs: { ...node.attrs, src, markdownSrc } } : node;
-  } catch { return node; }
+  if (/^data:image\/[a-z+]+;base64,/i.test(markdownSrc)) {
+    try {
+      const asset = await importImageDataUri(workspaceRoot, documentRelativePath, String(node.attrs?.alt ?? "image"), markdownSrc);
+      return { ...node, attrs: { ...node.attrs, src: asset.relativePath, markdownSrc: asset.relativePath } };
+    } catch { return node; }
+  }
+  return { ...node, ...(content ? { content } : {}) };
 }
 
-function hasLocalImage(node: TiptapNode): boolean {
-  if (node.type === "image") {
-    const src = String(node.attrs?.markdownSrc ?? node.attrs?.src ?? "");
-    if (src && !/^(?:[a-z][a-z\d+.-]*:|#|\/)/i.test(src)) return true;
-  }
-  return node.content?.some(hasLocalImage) ?? false;
+function hasEmbeddedImage(node: TiptapNode): boolean {
+  if (node.type === "image" && /^data:image\/[a-z+]+;base64,/i.test(String(node.attrs?.markdownSrc ?? node.attrs?.src ?? ""))) return true;
+  return node.content?.some(hasEmbeddedImage) ?? false;
 }
 
 export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, targetText, targetNonce, documentZoom, onZoomOut, onZoomReset, onZoomIn }: EditorPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pendingLink, setPendingLink] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<{ src: string; alt: string } | null>(null);
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const [imageDropActive, setImageDropActive] = useState(false);
+  async function insertImageAsset(image: { relativePath: string }, position?: number): Promise<boolean> {
+    if (!editor || editor.isDestroyed) return false;
+    if (position !== undefined) editor.commands.setTextSelection(position);
+    const fileName = image.relativePath.split("/").at(-1) ?? "圖片";
+    editor.chain().focus().setImage({ src: image.relativePath, alt: fileName }).run();
+    return true;
+  }
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false, link: false, underline: false }),
@@ -70,7 +80,7 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
       }),
       LinkShortcut,
       Underline,
-      SafeImage.configure({ inline: true, allowBase64: false }),
+      SafeImage.configure({ inline: true, allowBase64: false, resolveLocalImage: (source: string) => loadWorkspaceAsset(workspaceRoot, document.relativePath, source) } as never),
       TaskList,
       TaskItem.configure({ nested: true }),
       Table.configure({ resizable: true }),
@@ -85,8 +95,56 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
       attributes: { class: "prose-editor", "aria-label": t("editor.aria", { title: document.title }), spellcheck: "true" },
       handleDOMEvents: {
         click: (_view, event) => handleEditorLinkClick(event, setPendingLink),
+        dragover: (_view, event) => {
+          if (!event.dataTransfer?.files.length) return false;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setImageDropActive(true);
+          return true;
+        },
+        dragleave: (view, event) => {
+          if (event.target === view.dom) setImageDropActive(false);
+          return false;
+        },
+      },
+      handleDrop: (view, event) => {
+        const files = Array.from(event.dataTransfer?.files ?? []);
+        if (!files.length) return false;
+        event.preventDefault();
+        setImageDropActive(false);
+        setPasteError(null);
+        const position = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+        void (async () => {
+          const inserted: string[] = [];
+          for (const file of files) {
+            const image = await imageDataFromFile(file);
+            if (!image) continue;
+            if (!editor || editor.isDestroyed) return;
+            if (position !== undefined && !inserted.length) editor.commands.setTextSelection(position);
+            const asset = await importImageDataUri(workspaceRoot, document.relativePath, image.fileName, image.dataUri);
+            if (editor.isDestroyed) return;
+            editor.chain().focus().setImage({ src: asset.relativePath, alt: asset.relativePath.split("/").at(-1) ?? image.fileName }).run();
+            inserted.push(image.fileName);
+          }
+          if (!inserted.length) setPasteError(t("editor.dropImageUnsupported"));
+        })().catch(() => setPasteError(t("editor.pasteImageFailed")));
+        return true;
       },
       handlePaste: (view, event) => {
+        const image = Array.from(event.clipboardData?.files ?? []).find((file) => file.type.startsWith("image/"));
+        if (image) {
+          event.preventDefault();
+          setPasteError(null);
+          void imageDataFromFile(image).then(async (data) => {
+            if (!data || editor?.isDestroyed) {
+              if (!data) setPasteError(t("editor.pasteImageUnsupported"));
+              return;
+            }
+            const asset = await importImageDataUri(workspaceRoot, document.relativePath, data.fileName, data.dataUri);
+            if (!editor.isDestroyed) editor.chain().focus().setImage({ src: asset.relativePath, alt: asset.relativePath.split("/").at(-1) ?? data.fileName }).run();
+          }).catch(() => setPasteError(t("editor.pasteImageFailed")));
+          return true;
+        }
         const html = event.clipboardData?.getData("text/html") ?? "";
         if (!html) return false;
         event.preventDefault();
@@ -100,13 +158,13 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
   });
 
   useEffect(() => {
-    if (!editor || editor.isDestroyed || document.parsed.mode === "compatibility" || !hasLocalImage(document.parsed.doc)) return;
+    if (!editor || editor.isDestroyed || document.parsed.mode === "compatibility" || !hasEmbeddedImage(document.parsed.doc)) return;
     let cancelled = false;
-    void hydrateImages(document.parsed.doc, workspaceRoot, document.relativePath).then((nextDoc) => {
+    void migrateEmbeddedImages(document.parsed.doc, workspaceRoot, document.relativePath).then((nextDoc) => {
       if (cancelled || editor.isDestroyed) return;
       const current = JSON.stringify(editor.getJSON());
       const next = JSON.stringify(nextDoc);
-      if (current !== next) editor.commands.setContent(nextDoc, { emitUpdate: false });
+      if (current !== next) editor.commands.setContent(nextDoc, { emitUpdate: hasEmbeddedImage(document.parsed.doc) });
     });
     return () => { cancelled = true; };
   }, [document.parsed.doc, document.parsed.mode, document.relativePath, editor, workspaceRoot]);
@@ -133,6 +191,44 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
       editor.commands.focus(undefined, { scrollIntoView: true });
     }
   }, [editor, targetNonce, targetText]);
+
+  useEffect(() => {
+    if (!isTauri() || !editor || editor.isDestroyed) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    const withinEditor = (x: number, y: number) => {
+      const bounds = scrollRef.current?.getBoundingClientRect();
+      return Boolean(bounds && x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom);
+    };
+    void getCurrentWebview().onDragDropEvent(async ({ payload }) => {
+      if (disposed) return;
+      if (payload.type === "leave") {
+        setImageDropActive(false);
+        return;
+      }
+      const position = payload.position.toLogical(window.devicePixelRatio);
+      const isOverEditor = withinEditor(position.x, position.y);
+      if (payload.type === "enter" || payload.type === "over") {
+        setImageDropActive(isOverEditor);
+        return;
+      }
+      setImageDropActive(false);
+      if (!isOverEditor) return;
+      setPasteError(null);
+      let inserted = false;
+      for (const sourcePath of payload.paths) {
+        try {
+          const image = await importImageAsset(workspaceRoot, document.relativePath, sourcePath);
+          if (disposed || !(await insertImageAsset(image, inserted ? undefined : editor.view.posAtCoords({ left: position.x, top: position.y })?.pos))) return;
+          inserted = true;
+        } catch (error) {
+          if (!disposed) setPasteError(error instanceof Error ? error.message : String(error));
+          return;
+        }
+      }
+    }).then((unlisten) => { if (disposed) unlisten(); else stop = unlisten; });
+    return () => { disposed = true; stop?.(); };
+  }, [document.parsed.frontMatter, document.profile, editor]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -184,7 +280,8 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
           <ul>{document.parsed.issues.map((issue, index) => <li key={`${issue.message}-${index}`}>{issue.message}</li>)}</ul>
         </details>
       )}
-      <div ref={scrollRef} className="editor-scroll">
+      {pasteError && <p className="search-error" role="alert">{pasteError}</p>}
+      <div ref={scrollRef} className={imageDropActive ? "editor-scroll image-drop-active" : "editor-scroll"}>
         <EditorContent editor={editor} />
         <TableControls editor={editor} containerRef={scrollRef} />
       </div>

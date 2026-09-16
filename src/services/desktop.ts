@@ -57,6 +57,16 @@ export async function chooseWorkspace(): Promise<string | null> {
   return typeof selected === "string" ? selected : null;
 }
 
+export async function readRecentWorkspace(): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke("read_recent_workspace");
+}
+
+export async function rememberWorkspace(root: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("remember_workspace", { root });
+}
+
 export async function scanWorkspace(root: string): Promise<WorkspaceEntry[]> {
   if (!isTauri()) return demoTree();
   return invoke("scan_workspace", { root });
@@ -194,6 +204,14 @@ export interface ImportedImageAsset {
   relativePath: string;
 }
 
+export async function importImageAsset(root: string, documentRelativePath: string, sourcePath: string): Promise<ImportedImageAsset> {
+  return invoke("import_image_asset", { root, documentRelativePath, sourcePath });
+}
+
+export async function importImageDataUri(root: string, documentRelativePath: string, fileName: string, dataUri: string): Promise<ImportedImageAsset> {
+  return invoke("import_image_data_uri", { root, documentRelativePath, fileName, dataUri });
+}
+
 export async function chooseAndImportImage(root: string, documentRelativePath: string): Promise<ImportedImageAsset | null> {
   if (!isTauri()) return null;
   const selected = await open({
@@ -203,7 +221,7 @@ export async function chooseAndImportImage(root: string, documentRelativePath: s
     filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"] }],
   });
   if (typeof selected !== "string") return null;
-  return invoke("import_image_asset", { root, documentRelativePath, sourcePath: selected });
+  return importImageAsset(root, documentRelativePath, selected);
 }
 
 export async function exportWorkspace(root: string, workspaceName: string): Promise<boolean> {

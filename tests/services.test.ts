@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { imageDataFromFile } from "../src/services/embeddedImage";
+import { calculateTextStats } from "../src/services/textStats";
 import { encodeFile, decodeFile, UTF8_LF } from "../src/services/fileFormat";
 import { rewriteIncomingLinks, rewriteOutgoingLinks } from "../src/services/linkRewrite";
 import { WorkspaceSearchIndex } from "../src/services/searchIndex";
@@ -86,6 +88,41 @@ describe("tab ordering", () => {
 
   it("moves a tab after the drop target", () => {
     expect(reorderById(tabs, "a", "c", "after").map((tab) => tab.id)).toEqual(["b", "c", "a"]);
+  });
+});
+
+describe("embedded clipboard images", () => {
+  it("turns a supported clipboard image into a data URI and names it", async () => {
+    const file = new File(["image bytes"], "截圖.png", { type: "image/png" });
+    await expect(imageDataFromFile(file)).resolves.toEqual({
+      dataUri: "data:image/png;base64,aW1hZ2UgYnl0ZXM=",
+      fileName: "截圖.png",
+    });
+  });
+
+  it("rejects an unsupported clipboard type", async () => {
+    const file = new File(["text"], "note.txt", { type: "text/plain" });
+    await expect(imageDataFromFile(file)).resolves.toBeNull();
+  });
+
+  it("accepts an image file by extension when drag-and-drop omits its MIME type", async () => {
+    const file = new File(["image bytes"], "拖入圖片.webp", { type: "" });
+    await expect(imageDataFromFile(file)).resolves.toEqual({
+      dataUri: "data:image/webp;base64,aW1hZ2UgYnl0ZXM=",
+      fileName: "拖入圖片.webp",
+    });
+  });
+});
+
+describe("text statistics", () => {
+  it("counts Chinese characters and Latin words without Markdown structure", () => {
+    expect(calculateTextStats({
+      type: "doc",
+      content: [
+        { type: "heading", content: [{ type: "text", text: "Hello 世界" }] },
+        { type: "paragraph", content: [{ type: "text", text: "第二段 text" }] },
+      ],
+    })).toEqual({ words: 7, characters: 14 });
   });
 });
 
