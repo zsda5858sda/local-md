@@ -97,6 +97,7 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
   let showCaptionInput = Boolean(attributes.caption);
   let resizing = false;
   let dragging = false;
+  let selected = false;
   let resizeMove: ((event: PointerEvent) => void) | null = null;
   let resizeFinish: (() => void) | null = null;
   let resizeFrame = 0;
@@ -157,6 +158,7 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
       : null;
     figure.className = width ? "safe-image-node image-inline" : "safe-image-node";
     figure.classList.toggle("image-is-dragging", dragging);
+    figure.classList.toggle("image-selected", selected);
     figure.style.width = width ?? "";
   };
 
@@ -249,6 +251,11 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
     }));
   };
   const onDeleteClick = () => deleteImageNode(view, getPos);
+  const onFigureClick = (event: MouseEvent) => {
+    if ((event.target as HTMLElement).closest("button, figcaption, .image-resize-handle")) return;
+    selected = true;
+    applyLayout();
+  };
   let dragStart: { position: number; x: number; y: number } | null = null;
   const onImagePointerDown = (event: PointerEvent) => {
     if ((event.target as HTMLElement).closest("button, figcaption, .image-resize-handle")) {
@@ -293,6 +300,7 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
   figcaption.addEventListener("blur", onCaptionBlur);
   zoomButton.addEventListener("click", onZoomClick);
   deleteButton.addEventListener("click", onDeleteClick);
+  figure.addEventListener("click", onFigureClick);
   figure.addEventListener("pointerdown", onImagePointerDown);
 
   const onResizePointerDown = (event: PointerEvent) => {
@@ -362,6 +370,14 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
         || resizeHandle.contains(target)
         || mediaWrap.classList.contains("remote-image-placeholder");
     },
+    selectNode() {
+      selected = true;
+      applyLayout();
+    },
+    deselectNode() {
+      selected = false;
+      applyLayout();
+    },
     ignoreMutation() {
       return true;
     },
@@ -374,6 +390,7 @@ export function createSafeImageNodeView(node: ProseMirrorNode, view: EditorView,
       figcaption.removeEventListener("blur", onCaptionBlur);
       zoomButton.removeEventListener("click", onZoomClick);
       deleteButton.removeEventListener("click", onDeleteClick);
+      figure.removeEventListener("click", onFigureClick);
       figure.removeEventListener("pointerdown", onImagePointerDown);
       resizeHandle.removeEventListener("pointerdown", onResizePointerDown);
       if (resizeMove) document.removeEventListener("pointermove", resizeMove);
