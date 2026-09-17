@@ -34,6 +34,29 @@ describe("canonical Markdown round-trip", () => {
     editor.destroy();
   });
 
+  it("keeps two-column image layout through saving and reopening", () => {
+    const parsed = parseMarkdown("![one](assets/one.png)\n\n![two](assets/two.png)\n");
+    const doc = structuredClone(parsed.doc);
+    const images: TiptapNode[] = [];
+    const collect = (node: TiptapNode) => {
+      if (node.type === "image") images.push(node);
+      node.content?.forEach(collect);
+    };
+    collect(doc);
+    images.forEach((image) => { image.attrs = { ...image.attrs, width: "49%" }; });
+    const saved = serializeMarkdown(doc, parsed.frontMatter);
+    expect(saved).toContain('<!-- local-md:image-layout width="49%" -->');
+    const reopened = parseMarkdown(saved);
+    const reopenedImages: TiptapNode[] = [];
+    const collectReopened = (node: TiptapNode) => {
+      if (node.type === "image") reopenedImages.push(node);
+      node.content?.forEach(collectReopened);
+    };
+    collectReopened(reopened.doc);
+    expect(reopenedImages).toHaveLength(2);
+    expect(reopenedImages.map((image) => image.attrs?.width)).toEqual(["49%", "49%"]);
+  });
+
   for (const name of [
     "headings.md", "inline-formatting.md", "soft-break.md", "hard-break.md",
     "nested-list.md", "nested-list-two-digit-marker.md", "loose-vs-tight-list.md",

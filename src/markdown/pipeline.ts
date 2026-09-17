@@ -27,6 +27,49 @@ const stringifier = unified()
     resourceLink: false,
   });
 
+const IMAGE_LAYOUT_MARKER = /<!--\s*local-md:image-layout\s+width="(\d+(?:\.\d+)?%)"\s*-->/gi;
+
+function withImageLayouts(source: string): { source: string; widths: string[] } {
+  const widths: string[] = [];
+  return {
+    source: source.replace(IMAGE_LAYOUT_MARKER, (_marker, width: string) => {
+      widths.push(width);
+      return "";
+    }),
+    widths,
+  };
+}
+
+function applyImageLayouts(node: TiptapNode, widths: string[]): TiptapNode {
+  let index = 0;
+  const apply = (current: TiptapNode): TiptapNode => {
+    const content = current.content?.map(apply);
+    if (current.type !== "image") return { ...current, ...(content ? { content } : {}) };
+    const width = widths[index++];
+    return width ? { ...current, attrs: { ...current.attrs, width } } : current;
+  };
+  return apply(node);
+}
+
+function addImageLayoutMarkers(root: MdRoot): MdRoot {
+  const visit = (node: MdRoot | import("./nodeRegistry").MdNode): MdRoot | import("./nodeRegistry").MdNode => {
+    if (!node.children) return node;
+    return {
+      ...node,
+      children: node.children.flatMap((child) => {
+        const width = child.type === "image" && typeof child.localMdWidth === "string" && /^\d+(?:\.\d+)?%$/.test(child.localMdWidth)
+          ? child.localMdWidth
+          : null;
+        const visited = visit(child) as import("./nodeRegistry").MdNode;
+        return width
+          ? [{ type: "html", value: `<!-- local-md:image-layout width="${width}" -->` }, visited]
+          : [visited];
+      }),
+    };
+  };
+  return visit(root) as MdRoot;
+}
+
 export function normalizeEol(value: string): string {
   return value.replace(/\r\n?/g, "\n");
 }
@@ -46,10 +89,11 @@ function addUnsupportedFrontMatter(doc: TiptapNode, frontMatter: FrontMatterStat
 export function parseMarkdown(input: string): ParsedMarkdown {
   const source = normalizeEol(input).replace(/^\uFEFF/, "");
   const extracted = extractFrontMatter(source);
-  const tree = parser.parse(extracted.frontMatter.body);
+  const layout = withImageLayouts(extracted.frontMatter.body);
+  const tree = parser.parse(layout.source);
   if (!isMdastRoot(tree)) throw new TypeError("Markdown parser returned an invalid MDAST root");
   const validation = validateAndPreserve(tree, extracted.frontMatter.body);
-  const doc = addUnsupportedFrontMatter(mdastToTiptap(validation.root), extracted.frontMatter);
+  const doc = addUnsupportedFrontMatter(applyImageLayouts(mdastToTiptap(validation.root), layout.widths), extracted.frontMatter);
   return {
     doc,
     source,
@@ -76,7 +120,7 @@ export function serializeMarkdown(doc: TiptapNode, frontMatter: FrontMatterState
   const hasRawFrontMatterNode = doc.content?.[0]?.type === "rawMarkdown"
     && doc.content[0].attrs?.reason === t("markdown.unsupportedFrontMatter");
   const bodyDoc = hasRawFrontMatterNode ? { ...doc, content: doc.content?.slice(1) } : doc;
-  const ast = tiptapToMdast(bodyDoc);
+  const ast = addImageLayoutMarkers(tiptapToMdast(bodyDoc));
   const { root, replacements } = pullRawNodes(ast);
   let body = stringifier.stringify(root).replace(/\r\n?/g, "\n");
   for (const [marker, raw] of replacements) body = body.replace(marker, raw.trimEnd());

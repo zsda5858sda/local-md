@@ -22,6 +22,7 @@ Local MD 是依照《Local-first 區塊式 Markdown 編輯器系統設計規劃�
 - `.snapshots/` throttle 與 retention。
 - Workspace recursive watcher。
 - Markdown folder import、Workspace ZIP export、孤兒 asset 掃描。
+- 單一目前文件 PDF 匯出：在工具列按「匯出 PDF」，並在系統列印視窗選擇「儲存為 PDF」。輸出只包含目前開啟的文件，並固定使用白色背景；表格、程式碼與圖片會套用列印版面。
 - 預設阻擋遠端圖片，Tauri CSP 不允許外部連線或任意 script。
 - 瀏覽器示範工作區；不具 Tauri runtime 時不會存取本機 filesystem。
 - 側邊欄與頁面屬性面板可拖曳調整，並設有合理的最小與最大寬度。

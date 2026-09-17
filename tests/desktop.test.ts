@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openExternalLink } from "../src/services/desktop";
+import { openExternalLink, printCurrentDocument } from "../src/services/desktop";
 
 describe("desktop external links", () => {
   afterEach(() => {
@@ -18,5 +18,13 @@ describe("desktop external links", () => {
     vi.stubGlobal("window", { open: vi.fn() });
 
     await expect(openExternalLink("notes/local.md")).rejects.toThrow(/HTTP\(S\)/);
+  });
+
+  it("opens the browser print dialog outside Tauri", async () => {
+    const print = vi.fn();
+    vi.stubGlobal("window", { print });
+
+    await printCurrentDocument();
+    expect(print).toHaveBeenCalledOnce();
   });
 });

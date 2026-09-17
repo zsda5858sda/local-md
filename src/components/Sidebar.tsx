@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import type { DragEvent as ReactDragEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ChevronDown, ChevronRight, FilePlus2, FileText, Folder, FolderInput, FolderOpen,
   FolderPlus, MoreHorizontal, PanelLeftClose, RefreshCw, Search,
@@ -49,7 +49,34 @@ interface SidebarProps {
   onCollapse: () => void;
 }
 
-function TreeItem({ entry, depth, props }: { entry: WorkspaceEntry; depth: number; props: SidebarProps }) {
+function visibleEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
+  return entries
+    .filter((entry) => !(entry.kind === "directory" && entry.name === "assets"))
+    .map((entry) => entry.kind === "directory"
+      ? { ...entry, children: visibleEntries(entry.children ?? []) }
+      : entry);
+}
+
+export function keyboardNavigableEntries(entries: WorkspaceEntry[], expandedFolders: string[], depth = 0): Array<{ entry: WorkspaceEntry; depth: number }> {
+  return entries.flatMap((entry) => {
+    if (entry.kind === "directory" && entry.name === "assets") return [];
+    const current = [{ entry, depth }];
+    return entry.kind === "directory" && expandedFolders.includes(entry.relativePath)
+      ? [...current, ...keyboardNavigableEntries(entry.children ?? [], expandedFolders, depth + 1)]
+      : current;
+  });
+}
+
+interface TreeItemProps {
+  entry: WorkspaceEntry;
+  depth: number;
+  props: SidebarProps;
+  selectedTreePath: string | null;
+  onSelect: (entry: WorkspaceEntry) => void;
+  registerRow: (path: string, element: HTMLDivElement | null) => void;
+}
+
+function TreeItem({ entry, depth, props, selectedTreePath, onSelect, registerRow }: TreeItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const isFolder = entry.kind === "directory";
   const expanded = props.expandedFolders.includes(entry.relativePath);
@@ -63,8 +90,9 @@ function TreeItem({ entry, depth, props }: { entry: WorkspaceEntry; depth: numbe
   };
   return (
     <li>
-      <div className={`tree-row ${active ? "active" : ""}${props.fileDropTarget === entry.relativePath ? " file-drop-target" : ""}`} style={{ paddingInlineStart: `${10 + depth * 16}px` }} onDragOver={onFolderDragOver} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null) && props.fileDropTarget === entry.relativePath) props.onFileDragOver(null); }} onDrop={(event) => { if (!validDropTarget) return; event.preventDefault(); props.onFileDrop(entry.relativePath); }}>
-        <button className="tree-main" type="button" draggable={!isFolder} aria-expanded={isFolder ? expanded : undefined} onDragStart={(event) => { if (isFolder) return; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", entry.relativePath); props.onFileDragStart(entry); }} onDragEnd={props.onFileDragEnd} onClick={() => {
+      <div ref={(element) => registerRow(entry.relativePath, element)} className={`tree-row ${active ? "active" : ""}${selectedTreePath === entry.relativePath ? " keyboard-selected" : ""}${props.fileDropTarget === entry.relativePath ? " file-drop-target" : ""}`} style={{ paddingInlineStart: `${10 + depth * 16}px` }} onDragOver={onFolderDragOver} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null) && props.fileDropTarget === entry.relativePath) props.onFileDragOver(null); }} onDrop={(event) => { if (!validDropTarget) return; event.preventDefault(); props.onFileDrop(entry.relativePath); }}>
+        <button className="tree-main" type="button" draggable={!isFolder} aria-expanded={isFolder ? expanded : undefined} onDragStart={(event) => { if (isFolder) return; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", entry.relativePath); props.onFileDragStart(entry); }} onDragEnd={props.onFileDragEnd} onFocus={() => onSelect(entry)} onClick={() => {
+          onSelect(entry);
           if (isFolder) {
             props.onSelectFolder(entry.relativePath);
             props.onToggleFolder(entry.relativePath);
@@ -88,7 +116,7 @@ function TreeItem({ entry, depth, props }: { entry: WorkspaceEntry; depth: numbe
         )}
       </div>
       {isFolder && expanded && entry.children && (
-        <ul>{entry.children.map((child) => <TreeItem key={child.relativePath} entry={child} depth={depth + 1} props={props} />)}</ul>
+        <ul>{entry.children.map((child) => <TreeItem key={child.relativePath} entry={child} depth={depth + 1} props={props} selectedTreePath={selectedTreePath} onSelect={onSelect} registerRow={registerRow} />)}</ul>
       )}
     </li>
   );
@@ -96,8 +124,55 @@ function TreeItem({ entry, depth, props }: { entry: WorkspaceEntry; depth: numbe
 
 export function Sidebar(props: SidebarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
+  const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const replacementInputRef = useRef<HTMLInputElement>(null);
+  const treeNavRef = useRef<HTMLElement>(null);
+  const treeRowRefs = useRef(new Map<string, HTMLDivElement>());
+  const keyboardEntries = useMemo(() => keyboardNavigableEntries(props.entries, props.expandedFolders), [props.entries, props.expandedFolders]);
+
+  const registerRow = (path: string, element: HTMLDivElement | null) => {
+    if (element) treeRowRefs.current.set(path, element);
+    else treeRowRefs.current.delete(path);
+  };
+  const selectTreeEntry = (entry: WorkspaceEntry) => {
+    setSelectedTreePath(entry.relativePath);
+    window.requestAnimationFrame(() => treeRowRefs.current.get(entry.relativePath)?.scrollIntoView({ block: "nearest" }));
+  };
+  const handleTreeKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const selectedPath = selectedTreePath ?? props.selectedFolder ?? props.activePath ?? keyboardEntries[0]?.entry.relativePath;
+    const currentIndex = keyboardEntries.findIndex((item) => item.entry.relativePath === selectedPath);
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      event.stopPropagation();
+      const next = keyboardEntries[currentIndex < 0
+        ? (event.key === "ArrowUp" ? keyboardEntries.length - 1 : 0)
+        : currentIndex + (event.key === "ArrowUp" ? -1 : 1)];
+      if (next) selectTreeEntry(next.entry);
+      return;
+    }
+    const entry = keyboardEntries[currentIndex]?.entry;
+    if (!entry) return;
+    if (event.key === " " && entry.kind === "file") {
+      event.preventDefault();
+      event.stopPropagation();
+      props.onOpen(entry);
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== "F2") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Enter" && entry.kind === "directory" && !props.expandedFolders.includes(entry.relativePath)) {
+      props.onSelectFolder(entry.relativePath);
+      props.onToggleFolder(entry.relativePath);
+      return;
+    }
+    props.onRename(entry);
+  };
+
+  useEffect(() => {
+    if (selectedTreePath && !keyboardEntries.some((item) => item.entry.relativePath === selectedTreePath)) setSelectedTreePath(props.selectedFolder || null);
+  }, [keyboardEntries, props.selectedFolder, selectedTreePath]);
 
   useEffect(() => {
     if (!props.search.shortcut) return;
@@ -153,7 +228,7 @@ export function Sidebar(props: SidebarProps) {
           <button aria-label={t("sidebar.newFolder")} title={t("sidebar.newFolder")} onClick={() => props.onCreate("directory")}><FolderPlus /></button>
         </div>
       </div>
-      <nav className="tree" aria-label={t("sidebar.workspaceFiles")} onClick={(event) => { if (!(event.target instanceof Element) || !event.target.closest(".tree-row")) props.onSelectFolder(""); }}><ul>{props.entries.map((entry) => <TreeItem key={entry.relativePath} entry={entry} depth={0} props={props} />)}</ul></nav>
+      <nav ref={treeNavRef} className="tree" tabIndex={0} aria-label={t("sidebar.workspaceFiles")} onKeyDown={handleTreeKeyDown} onClick={(event) => { if (!(event.target instanceof Element) || !event.target.closest(".tree-row")) { setSelectedTreePath(null); props.onSelectFolder(""); } window.requestAnimationFrame(() => treeNavRef.current?.focus()); }}><ul>{visibleEntries(props.entries).map((entry) => <TreeItem key={entry.relativePath} entry={entry} depth={0} props={props} selectedTreePath={selectedTreePath} onSelect={selectTreeEntry} registerRow={registerRow} />)}</ul></nav>
       <footer className="sidebar-footer"><span className="status-dot" />{t("sidebar.offline")}</footer>
     </aside>
   );

@@ -10,7 +10,7 @@ import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 import type { OpenDocument, TiptapNode } from "../domain/types";
 import { AnnotatedLink, handleEditorLinkClick, IMAGE_NODE_DRAG_ENDED_EVENT, IMAGE_NODE_DRAG_MOVED_EVENT, IMAGE_NODE_DRAG_STARTED_EVENT, IMAGE_ZOOM_REQUESTED_EVENT, LinkShortcut, MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
-import { importImageAsset, importImageDataUri, isTauri, loadWorkspaceAsset, openExternalLink } from "../services/desktop";
+import { importImageAsset, importImageDataUri, isTauri, loadWorkspaceAsset, openExternalLink, printCurrentDocument } from "../services/desktop";
 import { sanitizeHtml } from "../services/htmlSanitizer";
 import { Toolbar } from "./Toolbar";
 import { TableControls } from "./TableControls";
@@ -65,6 +65,15 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
   const draggedImagePositionRef = useRef<number | null>(null);
   const imageDropIndicatorRef = useRef<HTMLDivElement | null>(null);
   const nativeFileDragRef = useRef(false);
+  const exportPdf = async () => {
+    const previousTitle = globalThis.document.title;
+    globalThis.document.title = document.title.replace(/\.(?:md|markdown)$/i, "") || "Local MD";
+    try {
+      await printCurrentDocument();
+    } finally {
+      globalThis.document.title = previousTitle;
+    }
+  };
   async function insertImageAsset(image: { relativePath: string }, position?: number): Promise<boolean> {
     if (!editor || editor.isDestroyed) return false;
     if (position !== undefined) editor.commands.setTextSelection(position);
@@ -324,12 +333,13 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
   if (document.parsed.mode === "compatibility") {
     return (
       <div className="source-mode">
-        <Toolbar editor={null} workspaceRoot={workspaceRoot} documentRelativePath={document.relativePath} documentZoom={documentZoom} onZoomOut={onZoomOut} onZoomReset={onZoomReset} onZoomIn={onZoomIn} />
+        <Toolbar editor={null} workspaceRoot={workspaceRoot} documentRelativePath={document.relativePath} documentZoom={documentZoom} onZoomOut={onZoomOut} onZoomReset={onZoomReset} onZoomIn={onZoomIn} onExportPdf={exportPdf} />
         <div className="compatibility-banner" role="alert">
           <strong>{t("editor.compatibilityTitle")}</strong>
           <span>{t("editor.compatibilityDescription")}</span>
         </div>
         <textarea aria-label={t("editor.sourceAria", { title: document.title })} value={document.parsed.source} onChange={(event) => onSourceChange(event.target.value)} spellCheck={false} />
+        <pre className="print-source">{document.parsed.source}</pre>
       </div>
     );
   }
@@ -344,6 +354,7 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
         onZoomIn={onZoomIn}
+        onExportPdf={exportPdf}
       />
       {document.parsed.issues.length > 0 && (
         <details className="issue-banner">

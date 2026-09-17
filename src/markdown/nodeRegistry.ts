@@ -106,8 +106,8 @@ export const NODE_REGISTRY: Record<string, NodeSpec> = {
   link: { supported: true, toTiptap: (node, context) => context.inline(node.children, [...context.marks, { type: "link", attrs: { href: node.url ?? "", title: node.title ?? null } }]) },
   image: {
     supported: true, tiptapTypes: ["image"],
-    toTiptap: (node) => ({ type: "image", attrs: { src: node.url ?? "", markdownSrc: node.url ?? "", alt: node.alt ?? "", title: node.title ?? null } }),
-    toMdast: (node) => ({ type: "image", url: String(node.attrs?.markdownSrc ?? node.attrs?.src ?? ""), alt: String(node.attrs?.alt ?? ""), title: (node.attrs?.title as string | null) ?? null }),
+    toTiptap: (node) => ({ type: "image", attrs: { src: node.url ?? "", markdownSrc: node.url ?? "", alt: node.alt ?? "", title: node.title ?? null, width: node.localMdWidth ?? null } }),
+    toMdast: (node) => ({ type: "image", url: String(node.attrs?.markdownSrc ?? node.attrs?.src ?? ""), alt: String(node.attrs?.alt ?? ""), title: (node.attrs?.title as string | null) ?? null, localMdWidth: node.attrs?.width ?? null }),
   },
   list: {
     supported: true, tiptapTypes: ["bulletList", "orderedList", "taskList"],

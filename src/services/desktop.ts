@@ -12,6 +12,20 @@ const UTF8_LF: FileFormatProfile = { encoding: "utf-8", bom: "none", eol: "lf" }
 
 export const isTauri = (): boolean => Boolean(window.__TAURI_INTERNALS__);
 
+export async function quitApplication(): Promise<void> {
+  if (isTauri()) await invoke("quit_application");
+}
+
+/** Opens the system print panel for the currently visible document. */
+export async function printCurrentDocument(): Promise<void> {
+  if (isTauri()) {
+    await invoke("print_current_document");
+    return;
+  }
+  if (typeof window.print !== "function") throw new Error("此瀏覽器不支援列印功能");
+  window.print();
+}
+
 export async function openExternalLink(url: string): Promise<void> {
   if (!/^https?:\/\//i.test(url)) throw new TypeError("Only HTTP(S) external links can be opened");
   if (!isTauri()) {

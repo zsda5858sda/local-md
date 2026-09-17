@@ -11,7 +11,7 @@ import { parseMarkdown } from "./markdown/pipeline";
 import {
   chooseWorkspace, createEntry, deleteEntry, errorMessage, exportWorkspace, importFolder, isTauri,
   readRecentWorkspace, rememberWorkspace,
-  readDocument, readWorkspaceSettings, renameEntry, saveDocument, scanOrphanAssets,
+  quitApplication, readDocument, readWorkspaceSettings, renameEntry, saveDocument, scanOrphanAssets,
   scanWorkspace,
 } from "./services/desktop";
 import { validateEntryName } from "./services/entryName";
@@ -511,6 +511,11 @@ const selectedTheme = settings.ui.theme;
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       const command = event.ctrlKey || event.metaKey;
+      if (isTauri() && event.metaKey && event.key.toLowerCase() === "q") {
+        event.preventDefault();
+        void quitApplication();
+        return;
+      }
       if (command && !event.altKey && ["+", "=", "-", "0"].includes(event.key)) {
         event.preventDefault();
         if (event.key === "0") setDocumentZoom(100);
@@ -527,6 +532,12 @@ const selectedTheme = settings.ui.theme;
       if (action === "block-browser") event.preventDefault();
       if (action === "save") { event.preventDefault(); if (activeIdRef.current) void persist(activeIdRef.current); }
       if (action === "close-tab") { event.preventDefault(); if (activeIdRef.current) void closeTab(activeIdRef.current); }
+      if (action === "new-file" || action === "new-folder") {
+        event.preventDefault();
+        setSidebarOpen(true);
+        setEntryDialog({ mode: action === "new-file" ? "create-file" : "create-directory", value: action === "new-file" ? t("app.untitledMarkdown") : t("app.newFolder") });
+      }
+      if (action === "open-workspace") { event.preventDefault(); void openWorkspace(); }
       if (action === "search" || action === "replace") {
         event.preventDefault();
         setSidebarOpen(true);
@@ -540,7 +551,7 @@ const selectedTheme = settings.ui.theme;
     window.addEventListener("keydown", keydown, true);
     window.addEventListener("beforeunload", beforeUnload);
     return () => { window.removeEventListener("keydown", keydown, true); window.removeEventListener("beforeunload", beforeUnload); };
-  }, [closeTab, persist]);
+  }, [closeTab, openWorkspace, persist]);
 
   useEffect(() => {
     const wheel = (event: WheelEvent) => {
@@ -785,10 +796,13 @@ const selectedTheme = settings.ui.theme;
       "--properties-default": `${PANEL_LIMITS.properties.default}px`,
       "--editor-min": `${PANEL_LIMITS.editorMinimum}px`,
       "--document-body-size": `${15 * settings.ui.documentZoom / 100}px`,
-      "--document-h1-size": `${44 * settings.ui.documentZoom / 100}px`,
-      "--document-h2-size": `${32 * settings.ui.documentZoom / 100}px`,
+      "--document-h1-size": `${34 * settings.ui.documentZoom / 100}px`,
+      "--document-h2-size": `${30 * settings.ui.documentZoom / 100}px`,
       "--document-h3-size": `${24 * settings.ui.documentZoom / 100}px`,
       "--document-source-size": `${13 * settings.ui.documentZoom / 100}px`,
+      "--document-font-family": settings.ui.documentFont === "rounded"
+        ? '"Hiragino Maru Gothic ProN", "Arial Rounded MT Bold", "Noto Sans TC", "Microsoft JhengHei", sans-serif'
+        : '"Helvetica Neue", Helvetica, Inter, -apple-system, "Noto Sans TC", "Microsoft JhengHei", sans-serif',
     } as CSSProperties}>
       {macTitlebarOverlay && <div className="macos-window-drag-region" data-tauri-drag-region aria-hidden="true" />}
       <div
@@ -869,6 +883,7 @@ const selectedTheme = settings.ui.theme;
       </main>
       {toolsOpen && createPortal(<div ref={toolsMenuPopupRef} className="tools-menu tools-menu-portal" data-theme={settings.ui.theme}>
         <label className="tools-toggle"><input type="checkbox" checked={settings.settings.autoSaveEnabled} onChange={(event) => setSettings((current) => ({ ...current, settings: { ...current.settings, autoSaveEnabled: event.target.checked } }))} /><span>自動儲存</span></label>
+        <label className="tools-select"><span>{t("app.documentFont")}</span><select aria-label={t("app.documentFont")} value={settings.ui.documentFont} onChange={(event) => setSettings((current) => ({ ...current, ui: { ...current.ui, documentFont: event.target.value as "sans" | "rounded" } }))}><option value="sans">{t("app.documentFontSans")}</option><option value="rounded">{t("app.documentFontRounded")}</option></select></label>
         <button onClick={() => void openWorkspace()}>切換工作區</button>
         <button onClick={() => void handleImport()}>匯入資料夾（含資源）</button>
         <button onClick={() => void handleExport()}>匯出 Workspace ZIP</button>
@@ -880,15 +895,27 @@ const selectedTheme = settings.ui.theme;
           <header><div><span>REFERENCE</span><h2 id="shortcut-dialog-title">鍵盤快捷鍵</h2></div><button className="icon-button" aria-label="關閉鍵盤快捷鍵" onClick={() => setShortcutsOpen(false)}><X /></button></header>
           <div className="shortcut-section"><h3>文件</h3><div className="shortcut-list">
             <div><span>儲存</span><kbd>⌘ / Ctrl</kbd><kbd>S</kbd></div>
+            <div><span>新增 Markdown</span><kbd>⌘ / Ctrl</kbd><kbd>N</kbd></div>
+            <div><span>新增資料夾</span><kbd>⇧⌘ / Ctrl Shift</kbd><kbd>N</kbd></div>
+            <div><span>開啟工作區</span><kbd>⌘ / Ctrl</kbd><kbd>O</kbd></div>
             <div><span>關閉目前分頁</span><kbd>⌘ / Ctrl</kbd><kbd>W</kbd></div>
             <div><span>搜尋</span><kbd>⌘ / Ctrl</kbd><kbd>F</kbd></div>
             <div><span>搜尋與取代</span><kbd>⌘ / Ctrl</kbd><kbd>H</kbd></div>
+            <div><span>喚回 Local MD</span><kbd>⌘</kbd><kbd>L</kbd></div>
             <div><span>放大／縮小文字</span><kbd>⌘ / Ctrl</kbd><kbd>＋ / −</kbd></div>
             <div><span>重設文字大小</span><kbd>⌘ / Ctrl</kbd><kbd>0</kbd></div>
           </div></div>
           <div className="shortcut-section"><h3>編輯</h3><div className="shortcut-list">
             <div><span>復原</span><kbd>⌘ / Ctrl</kbd><kbd>Z</kbd></div>
             <div><span>重做</span><kbd>⇧⌘ / Ctrl Shift</kbd><kbd>Z</kbd></div>
+            <div><span>剪下</span><kbd>⌘ / Ctrl</kbd><kbd>X</kbd></div>
+            <div><span>複製</span><kbd>⌘ / Ctrl</kbd><kbd>C</kbd></div>
+            <div><span>貼上</span><kbd>⌘ / Ctrl</kbd><kbd>V</kbd></div>
+            <div><span>全選</span><kbd>⌘ / Ctrl</kbd><kbd>A</kbd></div>
+            <div><span>檔案樹瀏覽</span><kbd>↑ / ↓</kbd></div>
+            <div><span>開啟文件</span><kbd>Space</kbd></div>
+            <div><span>展開資料夾／重新命名</span><kbd>Enter</kbd></div>
+            <div><span>重新命名</span><kbd>F2</kbd></div>
             <div><span>粗體</span><kbd>⌘ / Ctrl</kbd><kbd>B</kbd></div>
             <div><span>斜體</span><kbd>⌘ / Ctrl</kbd><kbd>I</kbd></div>
             <div><span>底線</span><kbd>⌘ / Ctrl</kbd><kbd>U</kbd></div>

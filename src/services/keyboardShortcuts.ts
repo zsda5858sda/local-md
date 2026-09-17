@@ -1,4 +1,4 @@
-export type ShortcutAction = "save" | "close-tab" | "search" | "replace" | "allow-editor" | "block-browser" | null;
+export type ShortcutAction = "save" | "close-tab" | "search" | "replace" | "new-file" | "new-folder" | "open-workspace" | "allow-editor" | "block-browser" | null;
 
 type ShortcutEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">;
 type MappedShortcutAction = Exclude<ShortcutAction, null>;
@@ -18,7 +18,10 @@ const SHORTCUTS = new Map<string, MappedShortcutAction>([
   [shortcutKey("w", true), "close-tab"],
   [shortcutKey("f", true), "search"],
   [shortcutKey("h", true), "replace"],
-  ...["a", "b", "c", "i", "k", "u", "v", "x", "y", "z"].map((key): [string, MappedShortcutAction] => [shortcutKey(key, true), "allow-editor"]),
+  [shortcutKey("n", true), "new-file"],
+  [shortcutKey("n", true, false, true), "new-folder"],
+  [shortcutKey("o", true), "open-workspace"],
+  ...["a", "b", "c", "i", "k", "l", "u", "v", "x", "y", "z"].map((key): [string, MappedShortcutAction] => [shortcutKey(key, true), "allow-editor"]),
   ...["arrowdown", "arrowleft", "arrowright", "arrowup", "backspace", "delete", "end", "enter", "home"].flatMap((key) => (
     [false, true].map((shift): [string, MappedShortcutAction] => [shortcutKey(key, true, false, shift), "allow-editor"])
   )),

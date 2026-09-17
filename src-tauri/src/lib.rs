@@ -18,7 +18,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{
-    menu::{Menu, MenuItem, Submenu},
+    menu::Menu,
     AppHandle, Emitter, Manager, State,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -32,13 +32,25 @@ const SNAPSHOT_MIN_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_MARKDOWN_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
 const RECENT_WORKSPACE_FILE: &str = "recent-workspace.json";
-const QUIT_MENU_ID: &str = "quit-local-md";
 fn reveal_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+}
+
+#[tauri::command]
+fn quit_application(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
+fn print_current_document(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("找不到主要視窗，無法列印文件")?;
+    window.print().map_err(|error| format!("無法開啟列印面板：{error}"))
 }
 
 static URI_SCHEME: Lazy<Regex> = Lazy::new(|| {
@@ -550,7 +562,7 @@ fn default_settings(root: &Path) -> serde_json::Value {
             "exportMode": "strict",
             "openFolderFileFormatPolicy": "preserve"
         },
-        "ui": { "expandedFolders": [], "lastOpenedFile": null, "openTabs": [], "sidebarWidth": panel_limits.sidebar.default, "propertiesWidth": panel_limits.properties.default, "documentZoom": 100, "theme": "light", "tabGroups": [], "tabAssignments": {} }
+        "ui": { "expandedFolders": [], "lastOpenedFile": null, "openTabs": [], "sidebarWidth": panel_limits.sidebar.default, "propertiesWidth": panel_limits.properties.default, "documentZoom": 100, "documentFont": "sans", "theme": "light", "tabGroups": [], "tabAssignments": {} }
     })
 }
 
@@ -590,6 +602,9 @@ fn normalize_settings(root: &Path, value: &serde_json::Value) -> (serde_json::Va
         }
         if let Some(value) = ui.get("documentZoom").and_then(|item| item.as_u64()).filter(|item| (70..=160).contains(item)) {
             normalized["ui"]["documentZoom"] = value.into();
+        }
+        if let Some(value) = ui.get("documentFont").and_then(|item| item.as_str()).filter(|item| matches!(*item, "sans" | "rounded")) {
+            normalized["ui"]["documentFont"] = value.into();
         }
         if let Some(value) = ui.get("theme").and_then(|item| item.as_str()).filter(|item| matches!(*item, "light" | "dark")) {
             normalized["ui"]["theme"] = value.into();
@@ -1025,6 +1040,8 @@ pub fn run() {
         .manage(WatchState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             read_recent_workspace,
+            quit_application,
+            print_current_document,
             remember_workspace,
             scan_workspace,
             read_markdown,
@@ -1044,16 +1061,11 @@ pub fn run() {
             scan_orphan_assets,
         ])
         .setup(|app| {
-            let quit = MenuItem::with_id(app, QUIT_MENU_ID, "結束 Local MD", true, Some("CmdOrCtrl+Q"))?;
-            let app_menu = Submenu::with_items(app, "Local MD", true, &[&quit])?;
-            app.set_menu(Menu::with_items(app, &[&app_menu])?)?;
+            app.set_menu(Menu::default(app.handle())?)?;
             let shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::KeyL);
             app.global_shortcut().register(shortcut)?;
             if let Some(window) = app.get_webview_window("main") { window.set_title("Local MD")?; }
             Ok(())
-        })
-        .on_menu_event(|app, event| {
-            if event.id() == QUIT_MENU_ID { app.exit(0); }
         })
         .run(tauri::generate_context!())
         .expect("error while running Local MD");
@@ -1122,6 +1134,7 @@ mod tests {
         assert_eq!(settings["ui"]["sidebarWidth"], limits.sidebar.default);
         assert_eq!(settings["ui"]["propertiesWidth"], limits.properties.default);
         assert_eq!(settings["ui"]["documentZoom"], 100);
+        assert_eq!(settings["ui"]["documentFont"], "sans");
         assert_eq!(settings["ui"]["theme"], "light");
         assert!(settings["ui"]["tabGroups"].is_array());
         assert!(settings["ui"]["tabAssignments"].is_object());

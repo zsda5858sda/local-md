@@ -150,12 +150,20 @@ describe("keyboard shortcuts", () => {
     expect(shortcut("h", { metaKey: true })).toBe("replace");
     expect(shortcut("s", { ctrlKey: true })).toBe("save");
     expect(shortcut("w", { metaKey: true })).toBe("close-tab");
+    expect(shortcut("n", { metaKey: true })).toBe("new-file");
+    expect(shortcut("n", { metaKey: true, shiftKey: true })).toBe("new-folder");
+    expect(shortcut("o", { metaKey: true })).toBe("open-workspace");
   });
 
   it("keeps editor formatting shortcuts", () => {
+    expect(shortcut("a", { metaKey: true })).toBe("allow-editor");
     expect(shortcut("b", { ctrlKey: true })).toBe("allow-editor");
+    expect(shortcut("c", { metaKey: true })).toBe("allow-editor");
     expect(shortcut("k", { ctrlKey: true })).toBe("allow-editor");
+    expect(shortcut("l", { metaKey: true })).toBe("allow-editor");
     expect(shortcut("u", { ctrlKey: true })).toBe("allow-editor");
+    expect(shortcut("v", { metaKey: true })).toBe("allow-editor");
+    expect(shortcut("x", { metaKey: true })).toBe("allow-editor");
     expect(shortcut("8", { ctrlKey: true, shiftKey: true })).toBe("allow-editor");
   });
 

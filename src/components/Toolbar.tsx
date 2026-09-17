@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import { createPortal } from "react-dom";
 import {
-  Bold, Braces, Code2, Heading1, Heading2, Image, Italic, Link2, List,
+  Bold, Braces, Code2, FileDown, Heading1, Heading2, Image, Italic, Link2, List,
   ListChecks, ListOrdered, Minus, Plus, Quote, Redo2, Strikethrough, Table2,
   Underline as UnderlineIcon, Undo2,
 } from "lucide-react";
@@ -18,6 +18,7 @@ interface ToolbarProps {
   onZoomOut: () => void;
   onZoomReset: () => void;
   onZoomIn: () => void;
+  onExportPdf: () => Promise<void>;
 }
 
 type InputDialog = { kind: "link" | "image"; value: string; imageTab?: "upload" | "url" };
@@ -65,12 +66,27 @@ function ToolbarButton({ label, shortcut, active, disabled, onClick, children }:
   );
 }
 
-export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZoom, onZoomOut, onZoomReset, onZoomIn }: ToolbarProps) {
+export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZoom, onZoomOut, onZoomReset, onZoomIn, onExportPdf }: ToolbarProps) {
   const zoomControl = <ZoomControl documentZoom={documentZoom} onZoomOut={onZoomOut} onZoomReset={onZoomReset} onZoomIn={onZoomIn} />;
   const [dialog, setDialog] = useState<InputDialog | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const exportPdf = useCallback(async () => {
+    setExportError(null);
+    setExportingPdf(true);
+    try {
+      await onExportPdf();
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [onExportPdf]);
+  const exportControl = <div className="toolbar-export"><ToolbarButton label={t("toolbar.exportPdf")} disabled={exportingPdf} onClick={() => void exportPdf()}><FileDown /></ToolbarButton></div>;
 
   const addLink = useCallback(() => {
     if (!editor) return;
@@ -112,7 +128,7 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZ
     }
   }, [documentRelativePath, editor, workspaceRoot]);
 
-  if (!editor) return <div className="toolbar" aria-label={t("toolbar.aria")}><div className="toolbar-controls" />{zoomControl}</div>;
+  if (!editor) return <div className="toolbar" aria-label={t("toolbar.aria")}><div className="toolbar-controls" />{exportError && <p className="toolbar-export-error" role="alert">{t("toolbar.exportPdfFailed", { message: exportError })}</p>}{exportControl}{zoomControl}</div>;
   const command = () => editor.chain().focus();
   const codeBlockActive = editor.isActive("codeBlock");
 
@@ -163,6 +179,8 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZ
         <ToolbarButton label={t("toolbar.insertTable")} onClick={() => command().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table2 /></ToolbarButton>
       </div>
       </div>
+      {exportError && <p className="toolbar-export-error" role="alert">{t("toolbar.exportPdfFailed", { message: exportError })}</p>}
+      {exportControl}
       {dialog?.kind === "link" && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDialog(null); }}>
           <form className="entry-dialog toolbar-input-dialog" role="dialog" aria-modal="true" aria-labelledby="toolbar-dialog-title" onSubmit={(event) => { event.preventDefault(); submitLinkDialog(); }} onKeyDown={(event) => { if (event.key === "Escape") setDialog(null); }}>
