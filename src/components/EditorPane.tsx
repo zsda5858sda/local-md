@@ -9,7 +9,7 @@ import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 import type { OpenDocument, TiptapNode } from "../domain/types";
-import { AnnotatedLink, handleEditorLinkClick, IMAGE_NODE_DRAG_ENDED_EVENT, IMAGE_NODE_DRAG_MOVED_EVENT, IMAGE_NODE_DRAG_STARTED_EVENT, IMAGE_ZOOM_REQUESTED_EVENT, LinkShortcut, MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
+import { AnnotatedLink, handleEditorLinkClick, IMAGE_NODE_DRAG_ENDED_EVENT, IMAGE_NODE_DRAG_MOVED_EVENT, IMAGE_NODE_DRAG_STARTED_EVENT, IMAGE_ZOOM_REQUESTED_EVENT, LawLink, lawTextFromTarget, LinkShortcut, MarkdownMetadata, RawMarkdown, SafeImage } from "../editor/extensions";
 import { importImageAsset, importImageDataUri, isTauri, loadWorkspaceAsset, openExternalLink, printCurrentDocument } from "../services/desktop";
 import { sanitizeHtml } from "../services/htmlSanitizer";
 import { Toolbar } from "./Toolbar";
@@ -59,6 +59,7 @@ function hasEmbeddedImage(node: TiptapNode): boolean {
 export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, targetText, targetNonce, documentZoom, onZoomOut, onZoomReset, onZoomIn }: EditorPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pendingLink, setPendingLink] = useState<string | null>(null);
+  const [lawPopover, setLawPopover] = useState<{ text: string; left: number; top: number } | null>(null);
   const [zoomedImage, setZoomedImage] = useState<{ src: string; alt: string } | null>(null);
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [imageDropActive, setImageDropActive] = useState(false);
@@ -90,6 +91,7 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
         autolink: true,
         HTMLAttributes: { rel: "noopener noreferrer", target: null },
       }),
+      LawLink,
       LinkShortcut,
       Underline,
       SafeImage.configure({ inline: true, allowBase64: false, resolveLocalImage: (source: string) => loadWorkspaceAsset(workspaceRoot, document.relativePath, source) } as never),
@@ -106,7 +108,15 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
     editorProps: {
       attributes: { class: "prose-editor", "aria-label": t("editor.aria", { title: document.title }), spellcheck: "true" },
       handleDOMEvents: {
-        click: (_view, event) => handleEditorLinkClick(event, setPendingLink),
+        click: (_view, event) => {
+          const lawText = lawTextFromTarget(event.target);
+          if (lawText !== null) {
+            event.preventDefault();
+            setLawPopover({ text: lawText, left: event.clientX, top: event.clientY });
+            return true;
+          }
+          return handleEditorLinkClick(event, setPendingLink);
+        },
         dragover: (_view, event) => {
           const transfer = event.dataTransfer;
           if (!transfer) return false;
@@ -330,6 +340,26 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
     return () => globalThis.document.removeEventListener("keydown", closeOnEscape);
   }, [zoomedImage]);
 
+  useEffect(() => {
+    if (!lawPopover) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setLawPopover(null); };
+    const closeOutside = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".law-link-popover, a[data-law-link]")) setLawPopover(null);
+    };
+    const closeOnScroll = (event: Event) => {
+      if (event.target instanceof Element && event.target.closest(".law-link-popover")) return;
+      setLawPopover(null);
+    };
+    globalThis.document.addEventListener("keydown", closeOnEscape);
+    globalThis.document.addEventListener("pointerdown", closeOutside);
+    globalThis.document.addEventListener("scroll", closeOnScroll, true);
+    return () => {
+      globalThis.document.removeEventListener("keydown", closeOnEscape);
+      globalThis.document.removeEventListener("pointerdown", closeOutside);
+      globalThis.document.removeEventListener("scroll", closeOnScroll, true);
+    };
+  }, [lawPopover]);
+
   if (document.parsed.mode === "compatibility") {
     return (
       <div className="source-mode">
@@ -378,6 +408,12 @@ export function EditorPane({ document, onChange, onSourceChange, workspaceRoot, 
             </div>
           </div>
         </div>
+      )}
+      {lawPopover && (
+        <aside className="law-link-popover" role="dialog" aria-label={t("law.open")} style={{ left: Math.max(8, Math.min(lawPopover.left, window.innerWidth - 328)), top: Math.max(8, Math.min(lawPopover.top + 10, window.innerHeight - Math.min(360, window.innerHeight - 32) - 16)) }}>
+          <div><strong>{t("law.open")}</strong><button type="button" aria-label={t("law.close")} onClick={() => setLawPopover(null)}>×</button></div>
+          <p>{lawPopover.text}</p>
+        </aside>
       )}
       {zoomedImage && (
         <div className="image-lightbox-backdrop" role="dialog" aria-modal="true" aria-label={t("image.zoom")} onMouseDown={(event) => { if (event.target === event.currentTarget) setZoomedImage(null); }}>

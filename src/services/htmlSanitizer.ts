@@ -6,7 +6,7 @@ const ALLOWED_TAGS = [
   "th", "thead", "tr", "u", "ul",
 ];
 
-const ALLOWED_ATTR = ["alt", "colspan", "href", "rowspan", "src", "start", "title"];
+const ALLOWED_ATTR = ["alt", "colspan", "data-law-link", "data-law-text", "href", "rowspan", "src", "start", "title"];
 
 type AttributeHookData = {
   attrName: string;

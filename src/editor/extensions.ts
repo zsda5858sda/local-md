@@ -1,8 +1,9 @@
-import { Extension, mergeAttributes, Node } from "@tiptap/core";
+import { Extension, Mark, mergeAttributes, Node } from "@tiptap/core";
 import type { NodeViewRendererProps } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import { t } from "../i18n";
+export { lawLinkTitleFromText, lawTextFromLinkTitle } from "../services/lawLink";
 
 type SafeImageAttributes = Record<string, unknown>;
 type ProseMirrorNode = NodeViewRendererProps["node"];
@@ -27,6 +28,14 @@ export function externalHttpLinkFromTarget(target: EventTarget | null): string |
   return href && /^https?:\/\//i.test(href) ? href : null;
 }
 
+export function lawTextFromTarget(target: EventTarget | null): string | null {
+  const element = target instanceof Element
+    ? target
+    : target instanceof globalThis.Node ? target.parentElement : null;
+  const lawLink = element?.closest<HTMLElement>("a[data-law-link='true'][data-law-text]");
+  return lawLink?.getAttribute("data-law-text") ?? null;
+}
+
 export function handleEditorLinkClick(event: MouseEvent, onExternalLink: (href: string) => void): boolean {
   if (linkHrefFromTarget(event.target) === null) return false;
   event.preventDefault();
@@ -41,6 +50,37 @@ export const AnnotatedLink = Link.extend({
   renderHTML({ HTMLAttributes }) {
     return ["a", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
       title: HTMLAttributes.title || HTMLAttributes.href,
+    }), 0];
+  },
+});
+
+export const LawLink = Mark.create({
+  name: "lawLink",
+  excludes: "link",
+  addAttributes() {
+    return {
+      href: { default: "#law" },
+      lawText: { default: "", rendered: false },
+    };
+  },
+  parseHTML() {
+    return [{
+      tag: "a[data-law-link='true'][data-law-text]",
+      getAttrs: (element) => ({
+        href: "#law",
+        lawText: (element as HTMLElement).getAttribute("data-law-text") ?? "",
+      }),
+    }];
+  },
+  renderHTML({ mark, HTMLAttributes }) {
+    const lawText = typeof mark.attrs.lawText === "string" ? mark.attrs.lawText : "";
+    return ["a", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
+      href: "#law",
+      class: "law-link",
+      "data-law-text": lawText,
+      "data-law-link": "true",
+      "aria-haspopup": "dialog",
+      title: t("law.open"),
     }), 0];
   },
 });

@@ -9,7 +9,8 @@ import StarterKit from "@tiptap/starter-kit";
 import { parseMarkdown, semanticRoundTrip, serializeMarkdown } from "../src/markdown/pipeline";
 import { containsUnsafeHtml, sanitizeHtml } from "../src/services/htmlSanitizer";
 import { NODE_REGISTRY, isRegisteredTiptapNode, isSupportedMdastNode } from "../src/markdown/nodeRegistry";
-import { AnnotatedLink, externalHttpLinkFromTarget, linkHrefFromTarget, SafeImage } from "../src/editor/extensions";
+import { AnnotatedLink, externalHttpLinkFromTarget, LawLink, lawTextFromTarget, linkHrefFromTarget, SafeImage } from "../src/editor/extensions";
+import { lawLinkTitleFromText, lawTextFromLinkTitle } from "../src/services/lawLink";
 import type { TiptapNode } from "../src/domain/types";
 
 const fixture = (name: string) => readFileSync(resolve(process.cwd(), "tests", "fixtures", name), "utf8");
@@ -131,6 +132,11 @@ describe("canonical Markdown round-trip", () => {
     expect(sanitized).toBe("<p><strong>safe</strong><img><a>link</a></p>");
   });
 
+  it("keeps inert law link attributes when pasting rendered content", () => {
+    expect(sanitizeHtml('<a href="#law" data-law-link="true" data-law-text="第一條%0A第二項">法條</a>'))
+      .toBe('<a href="#law" data-law-link="true" data-law-text="第一條%0A第二項">法條</a>');
+  });
+
   it("preserves every paragraph entered in a table cell", () => {
     const doc: TiptapNode = {
       type: "doc",
@@ -180,6 +186,28 @@ describe("canonical Markdown round-trip", () => {
     const textNode = reparsed.doc.content?.[0]?.content?.[0];
     expect(textNode?.text).toBe("combined");
     expect(new Set(textNode?.marks?.map((mark) => mark.type))).toEqual(new Set(["bold", "italic", "code", "link"]));
+  });
+
+  it("preserves user-authored multiline law text in a Markdown link title", () => {
+    const lawText = "第一項\n行為人應依規定辦理。\n\n第二項\n違反者處罰鍰。\n";
+    const doc: TiptapNode = {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [{ type: "text", text: "行政程序法第 1 條", marks: [{ type: "lawLink", attrs: { href: "#law", lawText } }] }],
+      }],
+    };
+    const output = serializeMarkdown(doc, parseMarkdown("").frontMatter);
+    expect(output).toContain("local-md-law:");
+    const reopened = parseMarkdown(output);
+    const mark = reopened.doc.content?.[0]?.content?.[0]?.marks?.[0];
+    expect(mark).toEqual({ type: "lawLink", attrs: { href: "#law", lawText } });
+    expect(serializeMarkdown(reopened.doc, reopened.frontMatter)).toBe(output);
+  });
+
+  it("keeps ordinary Markdown link titles as ordinary links", () => {
+    const parsed = parseMarkdown('[文件](notes.md "文件說明")\n');
+    expect(parsed.doc.content?.[0]?.content?.[0]?.marks?.[0]).toEqual({ type: "link", attrs: { href: "notes.md", title: "文件說明" } });
   });
 
   it("blocks remote images until an explicit click", () => {
@@ -258,6 +286,37 @@ describe("canonical Markdown round-trip", () => {
     }, [StarterKit.configure({ link: false }), AnnotatedLink]);
     expect(html).toContain('href="https://example.com/docs"');
     expect(html).toContain('title="https://example.com/docs"');
+  });
+
+  it("renders law text as an inert data attribute for the click popover", () => {
+    const lawText = "<strong>使用者輸入</strong>\n第二行";
+    const html = generateHTML({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "法條", marks: [{ type: "lawLink", attrs: { href: "#law", lawText } }] }] }],
+    }, [StarterKit.configure({ link: false }), AnnotatedLink, LawLink]);
+    expect(html).toContain('data-law-link="true"');
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    expect(wrapper.querySelector("a")?.getAttribute("data-law-text")).toBe(lawText);
+    expect(wrapper.querySelector("a")?.textContent).toBe("法條");
+  });
+
+  it("encodes and decodes law text without changing trailing newlines", () => {
+    const value = "第一條\n\n";
+    expect(lawTextFromLinkTitle(lawLinkTitleFromText(value))).toBe(value);
+  });
+
+  it("keeps external links with note-like titles as ordinary links", () => {
+    const parsed = parseMarkdown('[docs](https://example.com "local-md-law:hello")');
+    const marks = parsed.doc.content?.[0].content?.[0].marks;
+    expect(marks).toEqual([{ type: "link", attrs: { href: "https://example.com", title: "local-md-law:hello" } }]);
+  });
+
+  it("requires an explicit note marker before intercepting an anchor", () => {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = '<a href="https://example.com" data-law-text="note"><span>web</span></a><a href="#law" data-law-link="true" data-law-text="note"><span>note</span></a>';
+    expect(lawTextFromTarget(wrapper.querySelectorAll("span")[0])).toBeNull();
+    expect(lawTextFromTarget(wrapper.querySelectorAll("span")[1])).toBe("note");
   });
 
   it("allows modifier-click navigation only for HTTP(S) links", () => {

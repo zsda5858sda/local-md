@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import {
   Bold, Braces, Code2, FileDown, Heading1, Heading2, Image, Italic, Link2, List,
   ListChecks, ListOrdered, Minus, Plus, Quote, Redo2, Strikethrough, Table2,
-  Underline as UnderlineIcon, Undo2,
+  Underline as UnderlineIcon, Undo2, ScrollText,
 } from "lucide-react";
 import { t } from "../i18n";
 import { chooseAndImportImage } from "../services/desktop";
@@ -22,6 +22,7 @@ interface ToolbarProps {
 }
 
 type InputDialog = { kind: "link" | "image"; value: string; imageTab?: "upload" | "url" };
+type LawDialog = { label: string; text: string; editing: boolean };
 
 const isMacPlatform = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 const modifierKeyLabel = isMacPlatform ? "\u2318" : "Ctrl";
@@ -69,6 +70,7 @@ function ToolbarButton({ label, shortcut, active, disabled, onClick, children }:
 export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZoom, onZoomOut, onZoomReset, onZoomIn, onExportPdf }: ToolbarProps) {
   const zoomControl = <ZoomControl documentZoom={documentZoom} onZoomOut={onZoomOut} onZoomReset={onZoomReset} onZoomIn={onZoomIn} />;
   const [dialog, setDialog] = useState<InputDialog | null>(null);
+  const [lawDialog, setLawDialog] = useState<LawDialog | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
@@ -92,6 +94,15 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZ
     if (!editor) return;
     const href = editor.getAttributes("link").href;
     setDialog({ kind: "link", value: typeof href === "string" ? href : "https://" });
+  }, [editor]);
+
+  const addLawLink = useCallback(() => {
+    if (!editor) return;
+    if (editor.isActive("lawLink")) editor.chain().extendMarkRange("lawLink").run();
+    const { from, to } = editor.state.selection;
+    const label = editor.state.doc.textBetween(from, to, " ");
+    const existing = editor.getAttributes("lawLink").lawText;
+    setLawDialog({ label, text: typeof existing === "string" ? existing : "", editing: editor.isActive("lawLink") });
   }, [editor]);
 
   useEffect(() => {
@@ -146,6 +157,19 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZ
     if (value) editor.chain().focus().setImage({ src: value }).run();
     setDialog(null);
   };
+
+  const submitLawLink = () => {
+    if (!lawDialog) return;
+    const label = lawDialog.label.trim();
+    if (!label || !lawDialog.text.trim()) return;
+    editor.chain().focus().insertContent({ type: "text", text: label, marks: [{ type: "lawLink", attrs: { href: "#law", lawText: lawDialog.text } }] }).run();
+    setLawDialog(null);
+  };
+
+  const removeLawLink = () => {
+    editor.chain().focus().extendMarkRange("lawLink").unsetMark("lawLink").run();
+    setLawDialog(null);
+  };
   return (
     <div className="toolbar" role="toolbar" aria-label={t("toolbar.aria")}>
       <div className="toolbar-controls">
@@ -175,6 +199,7 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZ
       <div className="tool-separator" />
       <div className="tool-group">
         <ToolbarButton label={t("toolbar.insertLink")} shortcut="K" active={editor.isActive("link")} onClick={addLink}><Link2 /></ToolbarButton>
+        <ToolbarButton label={t("toolbar.insertLawLink")} active={editor.isActive("lawLink")} onClick={addLawLink}><ScrollText /></ToolbarButton>
         <ToolbarButton label={t("toolbar.insertImage")} onClick={() => { setImportError(null); setDialog({ kind: "image", value: "https://", imageTab: "upload" }); }}><Image /></ToolbarButton>
         <ToolbarButton label={t("toolbar.insertTable")} onClick={() => command().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table2 /></ToolbarButton>
       </div>
@@ -229,6 +254,16 @@ export function Toolbar({ editor, workspaceRoot, documentRelativePath, documentZ
               </div>
             )}
           </div>
+        </div>
+      )}
+      {lawDialog && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setLawDialog(null); }}>
+          <form className="entry-dialog toolbar-input-dialog law-link-dialog" role="dialog" aria-modal="true" aria-labelledby="law-link-dialog-title" onSubmit={(event) => { event.preventDefault(); submitLawLink(); }} onKeyDown={(event) => { if (event.key === "Escape") setLawDialog(null); }}>
+            <h2 id="law-link-dialog-title">{t("law.dialogTitle")}</h2>
+            <label><span>{t("law.labelField")}</span><input autoFocus value={lawDialog.label} onChange={(event) => setLawDialog({ ...lawDialog, label: event.target.value })} /></label>
+            <label><span>{t("law.textField")}</span><textarea value={lawDialog.text} placeholder={t("law.textPlaceholder")} onChange={(event) => setLawDialog({ ...lawDialog, text: event.target.value })} /></label>
+            <div>{lawDialog.editing && <button type="button" className="secondary-button law-link-remove" onClick={removeLawLink}>{t("law.remove")}</button>}<span /><button type="button" className="secondary-button" onClick={() => setLawDialog(null)}>{t("common.cancel")}</button><button type="submit" className="primary-button" disabled={!lawDialog.label.trim() || !lawDialog.text.trim()}>{t("common.confirm")}</button></div>
+          </form>
         </div>
       )}
       {zoomControl}

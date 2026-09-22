@@ -4,6 +4,7 @@ import {
   isMdNode, isMdRoot, NODE_REGISTRY, TIPTAP_NODE_REGISTRY,
   type MdNode, type MdRoot, type ToMdastContext, type ToTiptapContext,
 } from "./nodeRegistry";
+import { lawLinkTitleFromText } from "../services/lawLink";
 
 function text(value: string, marks?: TiptapMark[]): TiptapNode {
   return { type: "text", text: value.replace(/[\t ]*\n[\t ]*/g, " ").replace(/ {2,}/g, " "), ...(marks?.length ? { marks } : {}) };
@@ -50,7 +51,7 @@ function mdastText(node: MdNode): string {
   return typeof node.value === "string" ? node.value : (node.children ?? []).map(mdastText).join("");
 }
 
-const MARK_PRIORITY: Record<string, number> = { code: 0, bold: 10, italic: 20, strike: 30, link: 40, underline: 50 };
+const MARK_PRIORITY: Record<string, number> = { code: 0, bold: 10, italic: 20, strike: 30, link: 40, lawLink: 40, underline: 50 };
 
 const MARK_TO_MDAST: Record<string, (current: MdNode, node: TiptapNode, mark: TiptapMark) => MdNode> = {
   code: (current, node) => ({ type: "inlineCode", value: mdastText(current) || node.text || "" }),
@@ -58,6 +59,7 @@ const MARK_TO_MDAST: Record<string, (current: MdNode, node: TiptapNode, mark: Ti
   italic: (current) => ({ type: "emphasis", children: [current] }),
   strike: (current) => ({ type: "delete", children: [current] }),
   link: (current, _node, mark) => ({ type: "link", url: String(mark.attrs?.href ?? ""), title: (mark.attrs?.title as string | null) ?? null, children: [current] }),
+  lawLink: (current, _node, mark) => ({ type: "link", url: String(mark.attrs?.href ?? "#law"), title: lawLinkTitleFromText(String(mark.attrs?.lawText ?? "")), children: [current] }),
   underline: (current) => ({ type: "underline", children: [current] }),
 };
 

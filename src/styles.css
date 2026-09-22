@@ -10,6 +10,8 @@
   --line-soft: #ededed;
   --ink: #000;
   --muted: #666;
+  --input-focus: #999;
+  --input-selection: #dedede;
   --green: #ff3b30;
   --green-soft: #fce8ea;
   --amber: #ff3b30;
@@ -24,9 +26,11 @@
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { color: inherit; }
-input, textarea, select { color: var(--ink); caret-color: var(--green); }
+input, textarea, select { color: var(--ink); caret-color: var(--muted); accent-color: var(--input-focus); }
 input::placeholder, textarea::placeholder { color: #777; opacity: 1; }
-button:focus-visible, input:focus-visible, textarea:focus-visible, [contenteditable]:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+input:focus-visible, textarea:focus-visible, select:focus-visible, [contenteditable]:focus-visible { outline: 2px solid var(--input-focus); outline-offset: 2px; }
+input::selection, textarea::selection, [contenteditable]::selection, [contenteditable] ::selection { background: var(--input-selection); color: var(--ink); }
 
 .welcome-screen { min-height: 100%; display: grid; place-items: center; padding: 32px; overflow: hidden; background: #f3f3f1; transition: background-color .2s var(--ease-out), color .2s var(--ease-out); }
 .welcome-screen.macos-titlebar-overlay { padding-top: 60px; }
@@ -136,7 +140,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .search-options { padding: 7px 0 3px; display: flex; align-items: center; gap: 7px; }
 .search-options select { min-width: 0; flex: 1; padding: 5px 6px; border: 1px solid var(--line); background: white; border-radius: 2px; font-size: 10.5px; }
 .search-options label { display: flex; align-items: center; gap: 4px; font-size: 10.5px; }
-.search-options input { width: 13px; height: 13px; accent-color: var(--green); }
+.search-options input { width: 13px; height: 13px; accent-color: var(--input-focus); }
 .search-error { margin-top: 5px; padding: 6px; background: var(--green-soft); color: var(--danger); border-radius: 0; font-size: 10px; }
 .search-summary { padding: 7px 0 3px; display: flex; align-items: center; justify-content: space-between; gap: 5px; color: var(--muted); font-size: 10px; }
 .search-summary button { padding: 5px 7px; border: 1px solid var(--line); background: white; border-radius: 2px; color: var(--ink); font-size: 10px; cursor: pointer; }
@@ -168,7 +172,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .tools-menu .tools-shortcuts { margin-top: 4px; padding-top: 11px; display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); }
 .tools-menu .tools-shortcuts svg { width: 15px; }
 .tools-toggle { padding: 8px 10px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line-soft); color: var(--ink); font-size: 11.5px; cursor: pointer; }
-.tools-toggle input { width: 14px; height: 14px; accent-color: var(--green); }
+.tools-toggle input { width: 14px; height: 14px; accent-color: var(--input-focus); }
 .tools-toggle svg { width: 14px; }
 .tools-select { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line-soft); color: var(--ink); font-size: 11.5px; }
 .tools-select select { min-width: 102px; height: 27px; padding: 0 6px; border: 1px solid var(--line); border-radius: 2px; background: var(--paper); color: var(--ink); font-size: 11px; }
@@ -192,7 +196,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .tab-group-remove svg { width: 11px; }
 .tab-group-menu { position: fixed; z-index: 80; width: 244px; padding: 10px; border: 1px solid #000; border-radius: 0; background: var(--paper); box-shadow: none; }
 .tab-group-menu > input { width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 2px; background: #fff; color: var(--ink); outline: none; font: inherit; }
-.tab-group-menu > input:focus { border-color: var(--green); box-shadow: none; }
+.tab-group-menu > input:focus { border-color: var(--input-focus); box-shadow: none; }
 .tab-group-colors { display: flex; justify-content: space-between; gap: 5px; padding: 10px 1px; border-bottom: 1px solid var(--line-soft); }
 .tab-group-colors button { width: 20px; height: 20px; padding: 0; border: 2px solid transparent; border-radius: 50%; cursor: pointer; }
 .tab-group-colors button[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 2px; }
@@ -253,7 +257,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .toolbar-export-error { align-self: center; max-width: 300px; margin: 0 8px; color: var(--danger); font-size: 10px; line-height: 1.3; }
 .editor-scroll { min-height: 0; flex: 1; overflow: auto; background: var(--paper); }
 .editor-scroll.image-drop-active { box-shadow: inset 0 0 0 3px var(--green); background: var(--green-soft); }
-.ProseMirror { min-height: calc(100vh - 138px); max-width: 900px; margin: 0 auto; padding: 64px 72px 180px; caret-color: var(--green); font-family: var(--document-font-family, inherit); font-size: var(--document-body-size, 15px); }
+.ProseMirror { min-height: calc(100vh - 138px); max-width: 900px; margin: 0 auto; padding: 64px 72px 180px; caret-color: var(--muted); font-family: var(--document-font-family, inherit); font-size: var(--document-body-size, 15px); }
 .ProseMirror:focus { outline: none; }
 .ProseMirror > *:first-child { margin-top: 0; }
 .ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4 { color: #000; font-family: inherit; font-weight: 700; line-height: 1.05; }
@@ -370,8 +374,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .entry-dialog h2 { margin: 0; font-family: inherit; font-size: 24px; font-weight: 700; }
 .entry-dialog label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
 .entry-dialog input { width: 100%; padding: 10px 11px; border: 1px solid #000; background: white; border-radius: 2px; }
+.entry-dialog textarea { width: 100%; min-height: 150px; padding: 10px 11px; border: 1px solid #000; background: white; border-radius: 2px; resize: vertical; font: inherit; line-height: 1.55; }
 .entry-dialog select { width: 100%; padding: 10px 11px; border: 1px solid #000; background: white; color: var(--ink); border-radius: 2px; }
-.entry-dialog select:focus { border-color: var(--green); outline: none; }
+.entry-dialog select:focus { border-color: var(--input-focus); outline: none; }
 .move-dialog > .muted { margin: -5px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .entry-dialog > div { display: flex; justify-content: flex-end; gap: 8px; }
 .entry-dialog .primary-button { padding: 8px 13px; box-shadow: none; }
@@ -385,6 +390,17 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .upload-file-button:hover:not(:disabled) { border-color: var(--green); background: var(--green-soft); }
 .upload-file-button:disabled { opacity: .55; cursor: default; }
 .external-link-warning { margin: 0; white-space: pre-wrap; word-break: break-all; line-height: 1.65; }
+.law-link-dialog { width: min(520px, 100%); }
+.law-link-dialog > div { align-items: center; }
+.law-link-dialog > div > span { flex: 1; }
+.law-link-remove { margin-right: auto; color: var(--danger); }
+.ProseMirror a.law-link { color: var(--green); text-decoration: underline; text-decoration-style: dashed; text-underline-offset: 3px; cursor: pointer; }
+.law-link-popover { position: fixed; z-index: 85; width: min(320px, calc(100vw - 32px)); max-height: min(360px, calc(100vh - 32px)); padding: 12px 14px; overflow: auto; border: 1px solid #000; background: var(--paper); box-shadow: 0 8px 24px rgba(38,37,32,.2); border-radius: 3px; }
+.law-link-popover > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.law-link-popover strong { font-size: 12px; }
+.law-link-popover button { width: 24px; height: 24px; border: 0; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.law-link-popover button:hover { color: var(--ink); background: var(--green-soft); }
+.law-link-popover p { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 .shortcut-dialog { width: min(560px, 100%); max-height: min(680px, calc(100vh - 48px)); padding: 0; gap: 0; overflow: auto; }
 .shortcut-dialog > header { min-height: 92px; padding: 22px 24px; display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 1px solid #000; }
 .shortcut-dialog > header span { display: block; margin-bottom: 7px; color: var(--green); font-size: 9px; font-weight: 700; letter-spacing: .18em; }
@@ -463,6 +479,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   --line-soft: #272727;
   --ink: #f5f5f5;
   --muted: #9d9d9d;
+  --input-focus: #888;
+  --input-selection: #484848;
   --green-soft: #242424;
   color: var(--ink);
   background: var(--paper);

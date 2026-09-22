@@ -1,6 +1,7 @@
 import type { TiptapMark, TiptapNode } from "../domain/types";
 import type { Root } from "mdast";
 import { t } from "../i18n";
+import { lawTextFromLinkTitle } from "../services/lawLink";
 
 export type MdNode = {
   type: string;
@@ -103,7 +104,16 @@ export const NODE_REGISTRY: Record<string, NodeSpec> = {
     toMdast: (node, context) => ({ type: "blockquote", children: (node.content ?? []).map(context.block).filter(Boolean) as MdNode[] }),
   },
   thematicBreak: { supported: true, tiptapTypes: ["horizontalRule"], toTiptap: () => ({ type: "horizontalRule" }), toMdast: () => ({ type: "thematicBreak" }) },
-  link: { supported: true, toTiptap: (node, context) => context.inline(node.children, [...context.marks, { type: "link", attrs: { href: node.url ?? "", title: node.title ?? null } }]) },
+  link: {
+    supported: true,
+    toTiptap: (node, context) => {
+      const lawText = node.url === "#law" ? lawTextFromLinkTitle(node.title) : null;
+      return context.inline(node.children, [...context.marks, lawText === null
+        ? { type: "link", attrs: { href: node.url ?? "", title: node.title ?? null } }
+        : { type: "lawLink", attrs: { href: node.url ?? "#law", lawText } },
+      ]);
+    },
+  },
   image: {
     supported: true, tiptapTypes: ["image"],
     toTiptap: (node) => ({ type: "image", attrs: { src: node.url ?? "", markdownSrc: node.url ?? "", alt: node.alt ?? "", title: node.title ?? null, width: node.localMdWidth ?? null } }),
